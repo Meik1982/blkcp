@@ -87,135 +87,63 @@
 
 #include "dd_config.h"
 
-/* The name of the input file, or nullptr for the standard input. */
-static char const *input_file = nullptr;
-
-/* The name of the output file, or nullptr for the standard output. */
-static char const *output_file = nullptr;
-
-/* The page size on this host.  */
-static idx_t page_size;
-
-/* The number of bytes in which atomic reads are done. */
-static idx_t input_blocksize = 0;
-
-/* The number of bytes in which atomic writes are done. */
-static idx_t output_blocksize = 0;
-
-/* Conversion buffer size, in bytes.  0 prevents conversions. */
-static idx_t conversion_blocksize = 0;
-
-/* Skip this many records of 'input_blocksize' bytes before input. */
-static intmax_t skip_records = 0;
-
-/* Skip this many bytes before input in addition of 'skip_records'
-   records.  */
-static idx_t skip_bytes = 0;
-
-/* Skip this many records of 'output_blocksize' bytes before output. */
-static intmax_t seek_records = 0;
-
-/* Skip this many bytes in addition to 'seek_records' records before
-   output.  */
-static intmax_t seek_bytes = 0;
-
-/* Whether the final output was done with a seek (rather than a write).  */
-static bool final_op_was_seek;
-
-/* Copy only this many records.  The default is effectively infinity.  */
-static intmax_t max_records = INTMAX_MAX;
-
-/* Copy this many bytes in addition to 'max_records' records.  */
-static idx_t max_bytes = 0;
-
-/* Bit vector of conversions to apply. */
-static int conversions_mask = 0;
-
-/* Open flags for the input and output files.  */
-static int input_flags = 0;
-static int output_flags = 0;
-
-/* Status flags for what is printed to stderr.  */
-static int status_level = STATUS_DEFAULT;
-
-/* If nonzero, filter characters through the translation table.  */
-static bool translation_needed = false;
-
-/* Number of partial blocks written. */
-static intmax_t w_partial = 0;
-
-/* Number of full blocks written. */
-static intmax_t w_full = 0;
-
-/* Number of partial blocks read. */
-static intmax_t r_partial = 0;
-
-/* Number of full blocks read. */
-static intmax_t r_full = 0;
-
-/* Number of bytes written.  */
-static intmax_t w_bytes = 0;
-
-/* Last-reported number of bytes written, or negative if never reported.  */
-static intmax_t reported_w_bytes = -1;
-
-/* Time that dd started.  */
-static xtime_t start_time;
-
-/* Next time to report periodic progress.  */
-static xtime_t next_time;
-
-/* If positive, the number of bytes output in the current progress line.  */
-static int progress_len;
-
-/* True if input is seekable.  */
-static bool input_seekable;
-
-/* Error number corresponding to initial attempt to lseek input.
-   If ESPIPE, do not issue any more diagnostics about it.  */
-static int input_seek_errno;
-
-/* File offset of the input, in bytes, or -1 if it overflowed.  */
-static off_t input_offset;
-
-/* True if a partial read should be diagnosed.  */
-static bool warn_partial_read;
-
-/* Records truncated by conv=block. */
-static intmax_t r_truncate = 0;
-
-/* Output representation of newline and space characters.
-   They change if we're converting to EBCDIC.  */
-static char newline_character = '\n';
-static char space_character = ' ';
-
-/* I/O buffers.  */
-static char *ibuf;
-static char *obuf;
-
-/* Current index into 'obuf'. */
-static idx_t oc = 0;
-
-/* Index into current line, for 'conv=block' and 'conv=unblock'.  */
-static idx_t col = 0;
-
-#define interrupt_signal dd_interrupt_signal
-#define info_signal_count dd_info_signal_count
-#define caught_signals dd_caught_signals
-
-/* Whether to discard cache for input or output.  */
-static bool i_nocache, o_nocache;
-
-/* Whether to instruct the kernel to discard the complete file.  */
-static bool i_nocache_eof, o_nocache_eof;
-
-/* Function used for read (to handle iflag=fullblock parameter).  */
-static ssize_t (*iread_fnc) (int fd, char *buf, idx_t size);
-
 #include "args.h"
 #include "conversions.h"
 #include "stats.h"
 #include "signals.h"
+
+/* Global context holding all runtime state, config, buffers, and stats */
+static dd_context_t dd_ctx;
+
+#define input_file (dd_ctx.cfg.input_file)
+#define output_file (dd_ctx.cfg.output_file)
+#define input_blocksize (dd_ctx.cfg.input_blocksize)
+#define output_blocksize (dd_ctx.cfg.output_blocksize)
+#define conversion_blocksize (dd_ctx.cfg.conversion_blocksize)
+#define skip_records (dd_ctx.cfg.skip_records)
+#define skip_bytes (dd_ctx.cfg.skip_bytes)
+#define seek_records (dd_ctx.cfg.seek_records)
+#define seek_bytes (dd_ctx.cfg.seek_bytes)
+#define max_records (dd_ctx.cfg.max_records)
+#define max_bytes (dd_ctx.cfg.max_bytes)
+#define conversions_mask (dd_ctx.cfg.conversions_mask)
+#define input_flags (dd_ctx.cfg.input_flags)
+#define output_flags (dd_ctx.cfg.output_flags)
+#define status_level (dd_ctx.cfg.status_level)
+#define i_nocache (dd_ctx.cfg.i_nocache)
+#define o_nocache (dd_ctx.cfg.o_nocache)
+#define i_nocache_eof (dd_ctx.cfg.i_nocache_eof)
+#define o_nocache_eof (dd_ctx.cfg.o_nocache_eof)
+
+#define r_full (dd_ctx.stats.r_full)
+#define r_partial (dd_ctx.stats.r_partial)
+#define r_truncate (dd_ctx.stats.r_truncate)
+#define w_full (dd_ctx.stats.w_full)
+#define w_partial (dd_ctx.stats.w_partial)
+#define w_bytes (dd_ctx.stats.w_bytes)
+#define reported_w_bytes (dd_ctx.stats.reported_w_bytes)
+#define start_time (dd_ctx.stats.start_time)
+#define next_time (dd_ctx.stats.next_time)
+#define progress_len (dd_ctx.stats.progress_len)
+
+#define page_size (dd_ctx.page_size)
+#define ibuf (dd_ctx.ibuf)
+#define obuf (dd_ctx.obuf)
+#define oc (dd_ctx.oc)
+#define col (dd_ctx.col)
+#define input_seekable (dd_ctx.input_seekable)
+#define input_seek_errno (dd_ctx.input_seek_errno)
+#define input_offset (dd_ctx.input_offset)
+#define final_op_was_seek (dd_ctx.final_op_was_seek)
+#define warn_partial_read (dd_ctx.warn_partial_read)
+#define translation_needed (dd_ctx.translation_needed)
+#define newline_character (dd_ctx.newline_character)
+#define space_character (dd_ctx.space_character)
+#define iread_fnc (dd_ctx.iread_fnc)
+
+#define interrupt_signal dd_interrupt_signal
+#define info_signal_count dd_info_signal_count
+#define caught_signals dd_caught_signals
 
 /* True if we need to close the standard output *stream*.  */
 static bool close_stdout_required = true;
@@ -451,38 +379,13 @@ multiple_bits_set (int i)
 static void
 print_xfer_stats (xtime_t progress_time)
 {
-  dd_stats_t s = {
-    .r_full = r_full,
-    .r_partial = r_partial,
-    .r_truncate = r_truncate,
-    .w_full = w_full,
-    .w_partial = w_partial,
-    .w_bytes = w_bytes,
-    .reported_w_bytes = reported_w_bytes,
-    .start_time = start_time,
-    .next_time = next_time,
-    .progress_len = progress_len
-  };
-  dd_print_xfer_stats (&s, &progress_len, progress_time);
-  reported_w_bytes = w_bytes;
+  dd_print_xfer_stats (&dd_ctx.stats, &progress_len, progress_time);
 }
 
 static void
 print_stats (void)
 {
-  dd_stats_t s = {
-    .r_full = r_full,
-    .r_partial = r_partial,
-    .r_truncate = r_truncate,
-    .w_full = w_full,
-    .w_partial = w_partial,
-    .w_bytes = w_bytes,
-    .reported_w_bytes = reported_w_bytes,
-    .start_time = start_time,
-    .next_time = next_time,
-    .progress_len = progress_len
-  };
-  dd_print_stats (&s, status_level, &progress_len);
+  dd_print_stats (&dd_ctx.stats, status_level, &progress_len);
 }
 
 /* Install the signal handlers.  */
@@ -547,22 +450,7 @@ cleanup (void)
 static void
 process_signals (void)
 {
-  dd_context_t ctx;
-  memset (&ctx, 0, sizeof ctx);
-  ctx.cfg.status_level = status_level;
-  ctx.stats.r_full = r_full;
-  ctx.stats.r_partial = r_partial;
-  ctx.stats.r_truncate = r_truncate;
-  ctx.stats.w_full = w_full;
-  ctx.stats.w_partial = w_partial;
-  ctx.stats.w_bytes = w_bytes;
-  ctx.stats.reported_w_bytes = reported_w_bytes;
-  ctx.stats.start_time = start_time;
-  ctx.stats.next_time = next_time;
-  ctx.stats.progress_len = progress_len;
-
-  dd_process_signals (&ctx);
-  progress_len = ctx.stats.progress_len;
+  dd_process_signals (&dd_ctx);
 }
 
 static void
@@ -937,31 +825,10 @@ iftruncate (int fd, off_t length)
 static void
 scanargs (int argc, char *const *argv)
 {
-  dd_config_t cfg;
-  dd_init_default_config (&cfg);
+  dd_init_default_config (&dd_ctx.cfg);
   bool use_fullblock = false;
 
-  dd_scanargs (argc, argv, &cfg, &warn_partial_read, &use_fullblock);
-
-  input_file = cfg.input_file;
-  output_file = cfg.output_file;
-  input_blocksize = cfg.input_blocksize;
-  output_blocksize = cfg.output_blocksize;
-  conversion_blocksize = cfg.conversion_blocksize;
-  skip_records = cfg.skip_records;
-  skip_bytes = cfg.skip_bytes;
-  seek_records = cfg.seek_records;
-  seek_bytes = cfg.seek_bytes;
-  max_records = cfg.max_records;
-  max_bytes = cfg.max_bytes;
-  conversions_mask = cfg.conversions_mask;
-  input_flags = cfg.input_flags;
-  output_flags = cfg.output_flags;
-  status_level = cfg.status_level;
-  i_nocache = cfg.i_nocache;
-  o_nocache = cfg.o_nocache;
-  i_nocache_eof = cfg.i_nocache_eof;
-  o_nocache_eof = cfg.o_nocache_eof;
+  dd_scanargs (argc, argv, &dd_ctx.cfg, &warn_partial_read, &use_fullblock);
 
   iread_fnc = use_fullblock ? iread_fullblock : iread;
 }

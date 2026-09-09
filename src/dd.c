@@ -85,42 +85,7 @@
 /* Default input and output blocksize. */
 #define DEFAULT_BLOCKSIZE 512
 
-/* Conversions bit masks. */
-enum
-  {
-    C_ASCII = 01,
-
-    C_EBCDIC = 02,
-    C_IBM = 04,
-    C_BLOCK = 010,
-    C_UNBLOCK = 020,
-    C_LCASE = 040,
-    C_UCASE = 0100,
-    C_SWAB = 0200,
-    C_NOERROR = 0400,
-    C_NOTRUNC = 01000,
-    C_SYNC = 02000,
-
-    /* Use separate input and output buffers, and combine partial
-       input blocks. */
-    C_TWOBUFS = 04000,
-
-    C_NOCREAT = 010000,
-    C_EXCL = 020000,
-    C_FDATASYNC = 040000,
-    C_FSYNC = 0100000,
-
-    C_SPARSE = 0200000
-  };
-
-/* Status levels.  */
-enum
-  {
-    STATUS_NONE = 1,
-    STATUS_NOXFER = 2,
-    STATUS_DEFAULT = 3,
-    STATUS_PROGRESS = 4
-  };
+#include "dd_config.h"
 
 /* The name of the input file, or nullptr for the standard input. */
 static char const *input_file = nullptr;
@@ -234,14 +199,9 @@ static idx_t oc = 0;
 /* Index into current line, for 'conv=block' and 'conv=unblock'.  */
 static idx_t col = 0;
 
-/* The set of signals that are caught.  */
-static sigset_t caught_signals;
-
-/* If nonzero, the value of the pending fatal signal.  */
-static sig_atomic_t volatile interrupt_signal;
-
-/* A count of the number of pending info signals that have been received.  */
-static sig_atomic_t volatile info_signal_count;
+#define interrupt_signal dd_interrupt_signal
+#define info_signal_count dd_info_signal_count
+#define caught_signals dd_caught_signals
 
 /* Whether to discard cache for input or output.  */
 static bool i_nocache, o_nocache;
@@ -371,6 +331,8 @@ static struct symbol_value const statuses[] =
 };
 
 #include "conversions.h"
+#include "stats.h"
+#include "signals.h"
 
 /* True if we need to close the standard output *stream*.  */
 static bool close_stdout_required = true;
@@ -601,139 +563,43 @@ multiple_bits_set (int i)
   return MULTIPLE_BITS_SET (i);
 }
 
-static bool
-abbreviation_lacks_prefix (char const *message)
-{
-  return message[strlen (message) - 2] == ' ';
-}
-
 /* Print transfer statistics.  */
 
 static void
 print_xfer_stats (xtime_t progress_time)
 {
-  xtime_t now = progress_time ? progress_time : gethrxtime ();
-  static char const slash_s[] = "/s";
-  char hbuf[3][LONGEST_HUMAN_READABLE + sizeof slash_s];
-  double delta_s;
-  char const *bytes_per_second;
-  char const *si = human_readable (w_bytes, hbuf[0], human_opts, 1, 1);
-  char const *iec = human_readable (w_bytes, hbuf[1],
-                                    human_opts | human_base_1024, 1, 1);
-
-  /* Use integer arithmetic to compute the transfer rate,
-     since that makes it easy to use SI abbreviations.  */
-  char *bpsbuf = hbuf[2];
-  int bpsbufsize = sizeof hbuf[2];
-  if (start_time < now)
-    {
-      double XTIME_PRECISIONe0 = XTIME_PRECISION;
-      xtime_t delta_xtime = now - start_time;
-      delta_s = delta_xtime / XTIME_PRECISIONe0;
-      bytes_per_second = human_readable (w_bytes, bpsbuf, human_opts,
-                                         XTIME_PRECISION, delta_xtime);
-      strcat (bytes_per_second - bpsbuf + bpsbuf, slash_s);
-    }
-  else
-    {
-      delta_s = 0;
-      snprintf (bpsbuf, bpsbufsize, "%s B/s", _("Infinity"));
-      bytes_per_second = bpsbuf;
-    }
-
-  if (progress_time)
-    fputc ('\r', stderr);
-
-  /* Use full seconds when printing progress, since the progress
-     report is output once per second and there is little point
-     displaying any subsecond jitter.  Use default precision with %g
-     otherwise, as this provides more-useful output then.  With long
-     transfers %g can generate a number with an exponent; that is OK.  */
-  char delta_s_buf[24];
-  snprintf (delta_s_buf, sizeof delta_s_buf,
-            progress_time ? "%.0f s" : "%g s", delta_s);
-
-  int stats_len
-    = (abbreviation_lacks_prefix (si)
-       ? fprintf (stderr,
-                  ngettext ("%jd byte copied, %s, %s",
-                            "%jd bytes copied, %s, %s",
-                            select_plural (w_bytes)),
-                  w_bytes, delta_s_buf, bytes_per_second)
-       : abbreviation_lacks_prefix (iec)
-       ? fprintf (stderr,
-                  _("%jd bytes (%s) copied, %s, %s"),
-                  w_bytes, si, delta_s_buf, bytes_per_second)
-       : fprintf (stderr,
-                  _("%jd bytes (%s, %s) copied, %s, %s"),
-                  w_bytes, si, iec, delta_s_buf, bytes_per_second));
-
-  if (progress_time)
-    {
-      /* Erase any trailing junk on the output line by outputting
-         spaces.  In theory this could glitch the display because the
-         formatted translation of a line describing a larger file
-         could consume fewer screen columns than the strlen difference
-         from the previously formatted translation.  In practice this
-         does not seem to be a problem.  */
-      if (0 <= stats_len && stats_len < progress_len)
-        fprintf (stderr, "%*s", progress_len - stats_len, "");
-      progress_len = stats_len;
-    }
-  else
-    fputc ('\n', stderr);
-
+  dd_stats_t s = {
+    .r_full = r_full,
+    .r_partial = r_partial,
+    .r_truncate = r_truncate,
+    .w_full = w_full,
+    .w_partial = w_partial,
+    .w_bytes = w_bytes,
+    .reported_w_bytes = reported_w_bytes,
+    .start_time = start_time,
+    .next_time = next_time,
+    .progress_len = progress_len
+  };
+  dd_print_xfer_stats (&s, &progress_len, progress_time);
   reported_w_bytes = w_bytes;
 }
 
 static void
 print_stats (void)
 {
-  if (status_level == STATUS_NONE)
-    return;
-
-  if (0 < progress_len)
-    {
-      fputc ('\n', stderr);
-      progress_len = 0;
-    }
-
-  fprintf (stderr,
-           _("%jd+%jd records in\n"
-             "%jd+%jd records out\n"),
-           r_full, r_partial, w_full, w_partial);
-
-  if (r_truncate != 0)
-    fprintf (stderr,
-             ngettext ("%jd truncated record\n",
-                       "%jd truncated records\n",
-                       select_plural (r_truncate)),
-             r_truncate);
-
-  if (status_level == STATUS_NOXFER)
-    return;
-
-  print_xfer_stats (0);
-}
-
-/* An ordinary signal was received; arrange for the program to exit.  */
-
-static void
-interrupt_handler (int sig)
-{
-  if (! SA_RESETHAND)
-    signal (sig, SIG_DFL);
-  interrupt_signal = sig;
-}
-
-/* An info signal was received; arrange for the program to print status.  */
-
-static void
-siginfo_handler (int sig)
-{
-  if (! SA_NOCLDSTOP)
-    signal (sig, siginfo_handler);
-  info_signal_count++;
+  dd_stats_t s = {
+    .r_full = r_full,
+    .r_partial = r_partial,
+    .r_truncate = r_truncate,
+    .w_full = w_full,
+    .w_partial = w_partial,
+    .w_bytes = w_bytes,
+    .reported_w_bytes = reported_w_bytes,
+    .start_time = start_time,
+    .next_time = next_time,
+    .progress_len = progress_len
+  };
+  dd_print_stats (&s, status_level, &progress_len);
 }
 
 /* Install the signal handlers.  */
@@ -741,49 +607,7 @@ siginfo_handler (int sig)
 static void
 install_signal_handlers (void)
 {
-  bool catch_siginfo = ! (SIGINFO == SIGUSR1 && getenv ("POSIXLY_CORRECT"));
-
-#if SA_NOCLDSTOP
-
-  struct sigaction act;
-  sigemptyset (&caught_signals);
-  if (catch_siginfo)
-    sigaddset (&caught_signals, SIGINFO);
-  sigaction (SIGINT, nullptr, &act);
-  if (act.sa_handler != SIG_IGN)
-    sigaddset (&caught_signals, SIGINT);
-  act.sa_mask = caught_signals;
-
-  if (sigismember (&caught_signals, SIGINFO))
-    {
-      act.sa_handler = siginfo_handler;
-      /* Note we don't use SA_RESTART here and instead
-         handle EINTR explicitly in iftruncate etc.
-         to avoid blocking on uncommitted read/write calls.  */
-      act.sa_flags = 0;
-      sigaction (SIGINFO, &act, nullptr);
-    }
-
-  if (sigismember (&caught_signals, SIGINT))
-    {
-      act.sa_handler = interrupt_handler;
-      act.sa_flags = SA_NODEFER | SA_RESETHAND;
-      sigaction (SIGINT, &act, nullptr);
-    }
-
-#else
-
-  if (catch_siginfo)
-    {
-      signal (SIGINFO, siginfo_handler);
-      siginterrupt (SIGINFO, 1);
-    }
-  if (signal (SIGINT, SIG_IGN) != SIG_IGN)
-    {
-      signal (SIGINT, interrupt_handler);
-      siginterrupt (SIGINT, 1);
-    }
-#endif
+  dd_install_signal_handlers ();
 }
 
 /* Close FD.  Return 0 if successful, -1 (setting errno) otherwise.
@@ -805,10 +629,10 @@ iclose (int fd)
 
 static int synchronize_output (void);
 
-static void
-cleanup (void)
+void
+dd_cleanup (void)
 {
-  if (!interrupt_signal)
+  if (!dd_interrupt_signal)
     {
       int sync_status = synchronize_output ();
       if (sync_status)
@@ -827,6 +651,12 @@ cleanup (void)
            _("closing output file %s"), quoteaf (output_file));
 }
 
+static void
+cleanup (void)
+{
+  dd_cleanup ();
+}
+
 /* Process any pending signals.  If signals are caught, this function
    should be called periodically.  Ideally there should never be an
    unbounded amount of time when signals are not being processed.  */
@@ -834,30 +664,22 @@ cleanup (void)
 static void
 process_signals (void)
 {
-  while (interrupt_signal || info_signal_count)
-    {
-      int interrupt;
-      int infos;
-      sigset_t oldset;
+  dd_context_t ctx;
+  memset (&ctx, 0, sizeof ctx);
+  ctx.cfg.status_level = status_level;
+  ctx.stats.r_full = r_full;
+  ctx.stats.r_partial = r_partial;
+  ctx.stats.r_truncate = r_truncate;
+  ctx.stats.w_full = w_full;
+  ctx.stats.w_partial = w_partial;
+  ctx.stats.w_bytes = w_bytes;
+  ctx.stats.reported_w_bytes = reported_w_bytes;
+  ctx.stats.start_time = start_time;
+  ctx.stats.next_time = next_time;
+  ctx.stats.progress_len = progress_len;
 
-      sigprocmask (SIG_BLOCK, &caught_signals, &oldset);
-
-      /* Reload interrupt_signal and info_signal_count, in case a new
-         signal was handled before sigprocmask took effect.  */
-      interrupt = interrupt_signal;
-      infos = info_signal_count;
-
-      if (infos)
-        info_signal_count = infos - 1;
-
-      sigprocmask (SIG_SETMASK, &oldset, nullptr);
-
-      if (interrupt)
-        cleanup ();
-      print_stats ();
-      if (interrupt)
-        raise (interrupt);
-    }
+  dd_process_signals (&ctx);
+  progress_len = ctx.stats.progress_len;
 }
 
 static void

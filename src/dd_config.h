@@ -1,0 +1,123 @@
+#ifndef DD_CONFIG_H
+#define DD_CONFIG_H
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <sys/types.h>
+#include <signal.h>
+#include "idx.h"
+#include "xtime.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Status levels */
+enum dd_status_level
+{
+  STATUS_NONE = 1,
+  STATUS_NOXFER = 2,
+  STATUS_DEFAULT = 3,
+  STATUS_PROGRESS = 4
+};
+
+/* Conversion flags */
+enum dd_conversions
+{
+  C_ASCII = 000001,
+  C_EBCDIC = 000002,
+  C_IBM = 000004,
+  C_BLOCK = 000010,
+  C_UNBLOCK = 000020,
+  C_LCASE = 000040,
+  C_UCASE = 000100,
+  C_SWAB = 000200,
+  C_NOERROR = 000400,
+  C_NOTRUNC = 001000,
+  C_SYNC = 002000,
+  C_TWOBUFS = 004000,
+  C_NOCREAT = 010000,
+  C_EXCL = 020000,
+  C_FDATASYNC = 040000,
+  C_FSYNC = 0100000,
+  C_SPARSE = 0200000
+};
+
+/* Configuration parsed from CLI operands */
+typedef struct dd_config
+{
+  char const *input_file;
+  char const *output_file;
+  idx_t input_blocksize;
+  idx_t output_blocksize;
+  idx_t conversion_blocksize;
+  intmax_t skip_records;
+  idx_t skip_bytes;
+  intmax_t seek_records;
+  intmax_t seek_bytes;
+  intmax_t max_records;
+  idx_t max_bytes;
+  int conversions_mask;
+  int input_flags;
+  int output_flags;
+  int status_level;
+  bool i_nocache;
+  bool o_nocache;
+  bool i_nocache_eof;
+  bool o_nocache_eof;
+} dd_config_t;
+
+/* Transfer statistics & telemetry */
+typedef struct dd_stats
+{
+  intmax_t r_full;
+  intmax_t r_partial;
+  intmax_t r_truncate;
+  intmax_t w_full;
+  intmax_t w_partial;
+  intmax_t w_bytes;
+  intmax_t reported_w_bytes;
+  xtime_t start_time;
+  xtime_t next_time;
+  int progress_len;
+} dd_stats_t;
+
+/* Complete runtime context */
+typedef struct dd_context
+{
+  dd_config_t cfg;
+  dd_stats_t stats;
+
+  /* Runtime buffer state */
+  idx_t page_size;
+  char *ibuf;
+  char *obuf;
+  idx_t oc;
+  idx_t col;
+
+  /* I/O descriptors and status */
+  bool input_seekable;
+  int input_seek_errno;
+  off_t input_offset;
+  bool final_op_was_seek;
+  bool warn_partial_read;
+  bool translation_needed;
+  char newline_character;
+  char space_character;
+
+  /* Signal state */
+  sig_atomic_t volatile interrupt_signal;
+  sig_atomic_t volatile info_signal_count;
+
+  /* Dynamic function pointers */
+  ssize_t (*iread_fnc) (int fd, char *buf, idx_t size);
+} dd_context_t;
+
+/* Global or thread-local active context pointer for signal handling */
+extern dd_context_t *current_dd_ctx;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DD_CONFIG_H */

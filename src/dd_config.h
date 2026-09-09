@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <signal.h>
+#include <fcntl.h>
+#include "system.h"
 #include "idx.h"
 #include "xtime.h"
 
@@ -42,6 +44,46 @@ enum dd_conversions
   C_FSYNC = 0100000,
   C_SPARSE = 0200000
 };
+
+#define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))
+#define MULTIPLE_BITS_SET(i) (((i) & ((i) - 1)) != 0)
+
+#ifndef O_CIO
+# define O_CIO 0
+#endif
+
+enum dd_private_flags
+  {
+    v_mask = ~(0
+          | O_APPEND
+          | O_BINARY
+          | O_CIO
+          | O_DIRECT
+          | O_DIRECTORY
+          | O_DSYNC
+          | O_NOATIME
+          | O_NOCTTY
+          | O_NOFOLLOW
+          | O_NOLINKS
+          | O_NONBLOCK
+          | O_SYNC
+          | O_TEXT
+          ),
+
+    O_FULLBLOCK = FFS_MASK (v_mask),
+    v2_mask = v_mask ^ O_FULLBLOCK,
+
+    O_NOCACHE = FFS_MASK (v2_mask),
+    v3_mask = v2_mask ^ O_NOCACHE,
+
+    O_COUNT_BYTES = FFS_MASK (v3_mask),
+    v4_mask = v3_mask ^ O_COUNT_BYTES,
+
+    O_SKIP_BYTES = FFS_MASK (v4_mask),
+    v5_mask = v4_mask ^ O_SKIP_BYTES,
+
+    O_SEEK_BYTES = FFS_MASK (v5_mask)
+  };
 
 /* Configuration parsed from CLI operands */
 typedef struct dd_config

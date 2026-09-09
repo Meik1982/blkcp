@@ -4,7 +4,7 @@ LDFLAGS ?=
 LIBS ?= lib/libcoreutils.a
 
 TARGET = dd
-SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c
+SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c
 OBJS = $(SRCS:.c=.o)
 
 all: $(TARGET)

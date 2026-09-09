@@ -16,6 +16,9 @@
 
 /* Include this file _after_ system headers if possible.  */
 
+#ifndef DD_SYSTEM_H
+#define DD_SYSTEM_H
+
 #include <attribute.h>
 
 #include <alloca.h>
@@ -820,3 +823,5 @@ is_ENOTSUP (int err)
   quotearg_style (shell_escape_always_quoting_style, arg)
 #define quoteaf_n(n, arg) \
   quotearg_n_style (n, shell_escape_always_quoting_style, arg)
+
+#endif /* DD_SYSTEM_H */

@@ -111,75 +111,24 @@ iclose (int fd)
   return 0;
 }
 
-static int
-ifdatasync (int fd)
-{
-  int ret;
-  do
-    {
-      if (active_ctx) dd_process_signals (active_ctx);
-      ret = fdatasync (fd);
-    }
-  while (ret < 0 && errno == EINTR);
+/* Retry syscalls interrupted by signals (EINTR) while processing signals */
+#define RETRY_ON_EINTR(call) \
+  ({ \
+    int __ret; \
+    do \
+      { \
+        if (active_ctx) dd_process_signals (active_ctx); \
+        __ret = (call); \
+      } \
+    while (__ret < 0 && errno == EINTR); \
+    __ret; \
+  })
 
-  return ret;
-}
-
-static int
-ifd_reopen (int desired_fd, char const *file, int flag, mode_t mode)
-{
-  int ret;
-  do
-    {
-      if (active_ctx) dd_process_signals (active_ctx);
-      ret = fd_reopen (desired_fd, file, flag, mode);
-    }
-  while (ret < 0 && errno == EINTR);
-
-  return ret;
-}
-
-static int
-ifstat (int fd, struct stat *st)
-{
-  int ret;
-  do
-    {
-      if (active_ctx) dd_process_signals (active_ctx);
-      ret = fstat (fd, st);
-    }
-  while (ret < 0 && errno == EINTR);
-
-  return ret;
-}
-
-static int
-ifsync (int fd)
-{
-  int ret;
-  do
-    {
-      if (active_ctx) dd_process_signals (active_ctx);
-      ret = fsync (fd);
-    }
-  while (ret < 0 && errno == EINTR);
-
-  return ret;
-}
-
-static int
-iftruncate (int fd, off_t length)
-{
-  int ret;
-  do
-    {
-      if (active_ctx) dd_process_signals (active_ctx);
-      ret = ftruncate (fd, length);
-    }
-  while (ret < 0 && errno == EINTR);
-
-  return ret;
-}
+#define ifdatasync(fd)                      RETRY_ON_EINTR (fdatasync (fd))
+#define ifd_reopen(desired, f, flag, mode)  RETRY_ON_EINTR (fd_reopen (desired, f, flag, mode))
+#define ifstat(fd, st)                      RETRY_ON_EINTR (fstat (fd, st))
+#define ifsync(fd)                          RETRY_ON_EINTR (fsync (fd))
+#define iftruncate(fd, len)                 RETRY_ON_EINTR (ftruncate (fd, len))
 
 int
 dd_synchronize_output (dd_context_t *ctx)

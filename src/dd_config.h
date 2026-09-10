@@ -43,7 +43,8 @@ enum dd_conversions
   C_FDATASYNC = 040000,
   C_FSYNC = 0100000,
   C_SPARSE = 0200000,
-  C_AUTOTUNE = 0400000
+  C_AUTOTUNE = 0400000,
+  C_FORCE = 01000000
 };
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))
@@ -83,7 +84,10 @@ enum dd_private_flags
     O_SKIP_BYTES = FFS_MASK (v4_mask),
     v5_mask = v4_mask ^ O_SKIP_BYTES,
 
-    O_SEEK_BYTES = FFS_MASK (v5_mask)
+    O_SEEK_BYTES = FFS_MASK (v5_mask),
+    v6_mask = v5_mask ^ O_SEEK_BYTES,
+
+    O_FORCE = FFS_MASK (v6_mask)
   };
 
 /* Configuration parsed from CLI operands */
@@ -125,6 +129,14 @@ typedef struct dd_stats
   int progress_len;
 } dd_stats_t;
 
+enum dd_trans_mode
+{
+  TRANS_MODE_NONE = 0,
+  TRANS_MODE_TABLE,
+  TRANS_MODE_FAST_UCASE,
+  TRANS_MODE_FAST_LCASE
+};
+
 /* Complete runtime context */
 typedef struct dd_context
 {
@@ -145,8 +157,11 @@ typedef struct dd_context
   bool final_op_was_seek;
   bool warn_partial_read;
   bool translation_needed;
+  int trans_mode;
   char newline_character;
   char space_character;
+  unsigned char trans_table[256];
+  idx_t pending_spaces;
 
   /* Signal state */
   sig_atomic_t volatile interrupt_signal;

@@ -16,8 +16,6 @@
 
 #define to_uchar(c) ((unsigned char) (c))
 
-static unsigned char trans_table[256];
-
 static char const ascii_to_ebcdic[] =
 {
   '\000', '\001', '\002', '\003', '\067', '\055', '\056', '\057',
@@ -129,28 +127,48 @@ static char const ebcdic_to_ascii[] =
 };
 
 void
-dd_init_translations (void)
+dd_init_translations (unsigned char *trans_table)
 {
   for (int i = 0; i < 256; i++)
     trans_table[i] = (unsigned char) i;
 }
 
 static void
-translate_charset (char const *new_trans)
+translate_charset (unsigned char *trans_table, char const *new_trans)
 {
   for (int i = 0; i < 256; i++)
     trans_table[i] = new_trans[trans_table[i]];
 }
 
 void
-dd_apply_translations (int conversions_mask,
+dd_apply_translations (unsigned char *trans_table,
+                       int conversions_mask,
                        char *newline_char,
                        char *space_char,
-                       bool *translation_needed)
+                       bool *translation_needed,
+                       int *trans_mode)
 {
+  if ((conversions_mask & (C_ASCII | C_EBCDIC | C_IBM)) == 0)
+    {
+      if ((conversions_mask & (C_UCASE | C_LCASE)) == C_UCASE)
+        {
+          if (translation_needed) *translation_needed = true;
+          if (trans_mode) *trans_mode = 2; /* TRANS_MODE_FAST_UCASE */
+          return;
+        }
+      else if ((conversions_mask & (C_UCASE | C_LCASE)) == C_LCASE)
+        {
+          if (translation_needed) *translation_needed = true;
+          if (trans_mode) *trans_mode = 3; /* TRANS_MODE_FAST_LCASE */
+          return;
+        }
+    }
+
+  if (trans_mode) *trans_mode = 1; /* TRANS_MODE_TABLE */
+
   if (conversions_mask & C_ASCII)
     {
-      translate_charset (ebcdic_to_ascii);
+      translate_charset (trans_table, ebcdic_to_ascii);
       if (translation_needed) *translation_needed = true;
     }
 
@@ -169,22 +187,46 @@ dd_apply_translations (int conversions_mask,
 
   if (conversions_mask & C_EBCDIC)
     {
-      translate_charset (ascii_to_ebcdic);
+      translate_charset (trans_table, ascii_to_ebcdic);
       if (newline_char) *newline_char = ascii_to_ebcdic['\n'];
       if (space_char) *space_char = ascii_to_ebcdic[' '];
       if (translation_needed) *translation_needed = true;
     }
   else if (conversions_mask & C_IBM)
     {
-      translate_charset (ascii_to_ibm);
+      translate_charset (trans_table, ascii_to_ibm);
       if (newline_char) *newline_char = ascii_to_ibm['\n'];
       if (space_char) *space_char = ascii_to_ibm[' '];
       if (translation_needed) *translation_needed = true;
     }
 }
 
+/* Fast SIMD-vectorizable branchless ASCII upper-case transformation */
 void
-dd_translate_buffer (char *buf, idx_t nread)
+dd_vector_ucase (char *buf, idx_t nread)
+{
+  unsigned char *p = (unsigned char *) buf;
+  for (idx_t i = 0; i < nread; i++)
+    {
+      unsigned char c = p[i];
+      p[i] = (c >= 'a' && c <= 'z') ? (unsigned char)(c - 32) : c;
+    }
+}
+
+/* Fast SIMD-vectorizable branchless ASCII lower-case transformation */
+void
+dd_vector_lcase (char *buf, idx_t nread)
+{
+  unsigned char *p = (unsigned char *) buf;
+  for (idx_t i = 0; i < nread; i++)
+    {
+      unsigned char c = p[i];
+      p[i] = (c >= 'A' && c <= 'Z') ? (unsigned char)(c + 32) : c;
+    }
+}
+
+void
+dd_translate_buffer (unsigned char const *trans_table, char *buf, idx_t nread)
 {
   char *cp = buf;
   for (idx_t i = nread; i; i--, cp++)

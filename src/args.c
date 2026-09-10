@@ -47,6 +47,7 @@ static struct symbol_value const conversions[] =
   {"sync", C_SYNC},
   {"fdatasync", C_FDATASYNC},
   {"fsync", C_FSYNC},
+  {"force", C_FORCE},
   {"", 0}
 };
 
@@ -69,6 +70,7 @@ static struct symbol_value const flags[] =
   {"count_bytes", O_COUNT_BYTES},
   {"skip_bytes", O_SKIP_BYTES},
   {"seek_bytes", O_SEEK_BYTES},
+  {"force", O_FORCE},
   {"", 0}
 };
 
@@ -214,6 +216,78 @@ dd_init_default_config (dd_config_t *cfg)
   cfg->status_level = STATUS_DEFAULT;
 }
 
+/* Helper to parse and assign numeric CLI operands (ibs, obs, bs, cbs, skip, seek, count) */
+static void
+parse_numeric_operand (char const *name, char const *val, dd_config_t *cfg,
+                       idx_t *blocksize, intmax_t *count, bool *count_B,
+                       intmax_t *skip, bool *skip_B, intmax_t *seek, bool *seek_B)
+{
+  strtol_error invalid = LONGINT_OK;
+  intmax_t n = parse_integer (val, &invalid);
+  bool has_B = !!strchr (val, 'B');
+  intmax_t n_min = 0;
+  intmax_t n_max = INTMAX_MAX;
+  idx_t *converted_idx = nullptr;
+
+  idx_t max_blocksize = MIN (IDX_MAX - 1, MIN (SSIZE_MAX, OFF_T_MAX));
+
+  if (operand_is (name, "ibs"))
+    {
+      n_min = 1;
+      n_max = max_blocksize;
+      converted_idx = &cfg->input_blocksize;
+    }
+  else if (operand_is (name, "obs"))
+    {
+      n_min = 1;
+      n_max = max_blocksize;
+      converted_idx = &cfg->output_blocksize;
+    }
+  else if (operand_is (name, "bs"))
+    {
+      n_min = 1;
+      n_max = max_blocksize;
+      converted_idx = blocksize;
+    }
+  else if (operand_is (name, "cbs"))
+    {
+      n_min = 1;
+      n_max = MIN (SIZE_MAX, IDX_MAX);
+      converted_idx = &cfg->conversion_blocksize;
+    }
+  else if (operand_is (name, "skip") || operand_is (name, "iseek"))
+    {
+      *skip = n;
+      *skip_B = has_B;
+    }
+  else if (operand_is (name + (*name == 'o'), "seek"))
+    {
+      *seek = n;
+      *seek_B = has_B;
+    }
+  else if (operand_is (name, "count"))
+    {
+      *count = n;
+      *count_B = has_B;
+    }
+  else
+    {
+      error (0, 0, _("unrecognized operand %s"), quoteaf (name));
+      usage (EXIT_FAILURE);
+    }
+
+  if (n < n_min)
+    invalid = LONGINT_INVALID;
+  else if (n_max < n)
+    invalid = LONGINT_OVERFLOW;
+
+  if (invalid != LONGINT_OK)
+    error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+           "%s: %s", _("invalid number"), quoteaf (val));
+  else if (converted_idx)
+    *converted_idx = n;
+}
+
 void
 dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_read, bool *use_fullblock)
 {
@@ -255,6 +329,8 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         {
           if (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0))
             cfg->conversions_mask |= C_AUTOTUNE;
+          else if (operand_matches (val, "force", 0))
+            cfg->output_flags |= O_FORCE;
           else
             {
               error (0, 0, _("unrecognized operand %s"), quoteaf (name));
@@ -267,70 +343,8 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         }
       else
         {
-          strtol_error invalid = LONGINT_OK;
-          intmax_t n = parse_integer (val, &invalid);
-          bool has_B = !!strchr (val, 'B');
-          intmax_t n_min = 0;
-          intmax_t n_max = INTMAX_MAX;
-          idx_t *converted_idx = nullptr;
-
-          idx_t max_blocksize = MIN (IDX_MAX - 1, MIN (SSIZE_MAX, OFF_T_MAX));
-
-          if (operand_is (name, "ibs"))
-            {
-              n_min = 1;
-              n_max = max_blocksize;
-              converted_idx = &cfg->input_blocksize;
-            }
-          else if (operand_is (name, "obs"))
-            {
-              n_min = 1;
-              n_max = max_blocksize;
-              converted_idx = &cfg->output_blocksize;
-            }
-          else if (operand_is (name, "bs"))
-            {
-              n_min = 1;
-              n_max = max_blocksize;
-              converted_idx = &blocksize;
-            }
-          else if (operand_is (name, "cbs"))
-            {
-              n_min = 1;
-              n_max = MIN (SIZE_MAX, IDX_MAX);
-              converted_idx = &cfg->conversion_blocksize;
-            }
-          else if (operand_is (name, "skip") || operand_is (name, "iseek"))
-            {
-              skip = n;
-              skip_B = has_B;
-            }
-          else if (operand_is (name + (*name == 'o'), "seek"))
-            {
-              seek = n;
-              seek_B = has_B;
-            }
-          else if (operand_is (name, "count"))
-            {
-              count = n;
-              count_B = has_B;
-            }
-          else
-            {
-              error (0, 0, _("unrecognized operand %s"), quoteaf (name));
-              usage (EXIT_FAILURE);
-            }
-
-          if (n < n_min)
-            invalid = LONGINT_INVALID;
-          else if (n_max < n)
-            invalid = LONGINT_OVERFLOW;
-
-          if (invalid != LONGINT_OK)
-            error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
-                   "%s: %s", _("invalid number"), quoteaf (val));
-          else if (converted_idx)
-            *converted_idx = n;
+          parse_numeric_operand (name, val, cfg, &blocksize, &count, &count_B,
+                                 &skip, &skip_B, &seek, &seek_B);
         }
     }
 

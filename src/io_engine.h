@@ -19,6 +19,9 @@ ssize_t dd_iread_fullblock (int fd, char *buf, idx_t size);
 /* Execute the full I/O copy pipeline */
 int dd_execute (dd_context_t *ctx);
 
+/* Explicitly free allocated buffers */
+void dd_context_free (dd_context_t *ctx);
+
 #ifdef __cplusplus
 }
 #endif

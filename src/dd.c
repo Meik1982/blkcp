@@ -145,22 +145,27 @@ main (int argc, char **argv)
                                    (char const *) nullptr);
   close_stdout_required = false;
 
-  dd_init_translations ();
+  dd_init_translations (ctx.trans_table);
   dd_init_default_config (&ctx.cfg);
   ctx.newline_character = '\n';
   ctx.space_character = ' ';
+  ctx.pending_spaces = 0;
 
   bool use_fullblock = false;
   dd_scanargs (argc, argv, &ctx.cfg, &ctx.warn_partial_read, &use_fullblock);
   if (use_fullblock)
     ctx.iread_fnc = dd_iread_fullblock;
 
-  dd_apply_translations (ctx.cfg.conversions_mask,
+  dd_apply_translations (ctx.trans_table,
+                         ctx.cfg.conversions_mask,
                          &ctx.newline_character,
                          &ctx.space_character,
-                         &ctx.translation_needed);
+                         &ctx.translation_needed,
+                         &ctx.trans_mode);
 
   int exit_status = dd_execute (&ctx);
+
+  dd_context_free (&ctx);
 
   return exit_status;
 }

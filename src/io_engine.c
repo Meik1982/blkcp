@@ -29,6 +29,114 @@
 #include "conversions.h"
 #include "io_engine.h"
 
+#ifdef __linux__
+# include <sys/ioctl.h>
+# include <linux/fs.h>
+# include <sys/sysmacros.h>
+#endif
+
+/* Detects physical sector size and optimal I/O size for block devices or files */
+static idx_t
+detect_optimal_blocksize (int fd)
+{
+  struct stat st;
+  if (fstat (fd, &st) != 0)
+    return 0;
+
+#if defined __linux__ && defined BLKPBSZGET
+  if (S_ISBLK (st.st_mode))
+    {
+      unsigned int phys_sector = 0;
+      if (ioctl (fd, BLKPBSZGET, &phys_sector) == 0 && phys_sector > 0)
+        {
+# if defined BLKIOOPT
+          unsigned int opt_io = 0;
+          if (ioctl (fd, BLKIOOPT, &opt_io) == 0 && opt_io >= phys_sector)
+            return opt_io;
+# endif
+          return phys_sector;
+        }
+    }
+#endif
+
+  if (S_ISREG (st.st_mode) && st.st_blksize > 0)
+    return st.st_blksize;
+
+  return 0;
+}
+
+/* Verifies that the target block device is not a mounted system partition unless forced */
+static void
+check_target_safety (dd_context_t *ctx)
+{
+  if (!ctx->cfg.output_file)
+    return;
+
+  if ((ctx->cfg.output_flags & O_FORCE) || (ctx->cfg.conversions_mask & C_FORCE))
+    return;
+
+  struct stat target_st;
+  if (stat (ctx->cfg.output_file, &target_st) != 0)
+    return;
+
+  if (!S_ISBLK (target_st.st_mode))
+    return;
+
+#ifdef __linux__
+  FILE *fp = fopen ("/proc/mounts", "r");
+  if (!fp)
+    return;
+
+  char line[1024];
+  char devpath[512];
+  char mountpoint[512];
+
+  while (fgets (line, sizeof line, fp))
+    {
+      if (sscanf (line, "%511s %511s", devpath, mountpoint) != 2)
+        continue;
+
+      if (strcmp (mountpoint, "/") == 0
+          || strcmp (mountpoint, "/boot") == 0
+          || strcmp (mountpoint, "/boot/efi") == 0
+          || strcmp (mountpoint, "/home") == 0)
+        {
+          struct stat m_st;
+          if (stat (devpath, &m_st) == 0 && S_ISBLK (m_st.st_mode))
+            {
+              bool match = false;
+              if (m_st.st_rdev == target_st.st_rdev)
+                match = true;
+              else if (major (m_st.st_rdev) == major (target_st.st_rdev))
+                {
+                  char const *tgt_base = strrchr (ctx->cfg.output_file, '/');
+                  char const *dev_base = strrchr (devpath, '/');
+                  if (tgt_base && dev_base)
+                    {
+                      tgt_base++;
+                      dev_base++;
+                      size_t tgt_len = strlen (tgt_base);
+                      if (strncmp (dev_base, tgt_base, tgt_len) == 0)
+                        match = true;
+                    }
+                }
+
+              if (match)
+                {
+                  fclose (fp);
+                  error (EXIT_FAILURE, 0,
+                         _("SAFETY GUARD: refusing to overwrite '%s' which contains mounted system path '%s'.\n"
+                           "Use 'oflag=force' or 'opt=force' to override if intentional."),
+                         quoteaf (ctx->cfg.output_file), quoteaf (mountpoint));
+                }
+            }
+        }
+    }
+
+  fclose (fp);
+#endif
+}
+
 static int const human_opts =
   (human_autoscale | human_round_to_nearest
    | human_space_before_unit | human_SI | human_B);
@@ -413,26 +521,24 @@ copy_with_block (dd_context_t *ctx, char const *buf, idx_t nread)
 static void
 copy_with_unblock (dd_context_t *ctx, char const *buf, idx_t nread)
 {
-  static idx_t pending_spaces = 0;
-
   for (idx_t i = 0; i < nread; i++)
     {
       char c = buf[i];
 
       if (ctx->col++ >= ctx->cfg.conversion_blocksize)
         {
-          ctx->col = pending_spaces = 0;
+          ctx->col = ctx->pending_spaces = 0;
           i--;
           output_char (ctx, ctx->newline_character);
         }
       else if (c == ctx->space_character)
-        pending_spaces++;
+        ctx->pending_spaces++;
       else
         {
-          while (pending_spaces)
+          while (ctx->pending_spaces)
             {
               output_char (ctx, ctx->space_character);
-              --pending_spaces;
+              --ctx->pending_spaces;
             }
           output_char (ctx, c);
         }
@@ -449,6 +555,7 @@ advance_input_offset (dd_context_t *ctx, intmax_t offset)
 static intmax_t
 skip (dd_context_t *ctx, int fd, char const *file, intmax_t records, idx_t blocksize, idx_t *bytes)
 {
+  (void) file;
   off_t offset;
   if (! ckd_mul (&offset, records, blocksize)
       && ! ckd_add (&offset, offset, *bytes)
@@ -471,6 +578,98 @@ skip (dd_context_t *ctx, int fd, char const *file, intmax_t records, idx_t block
       skipped++;
     }
   return 0;
+}
+
+/* Internal state tracking for dynamic in-flight I/O autotuning */
+typedef struct
+{
+  bool active;
+  size_t current_stage;
+  int stage_blocks_done;
+  xtime_t stage_start_time;
+  intmax_t stage_bytes_start;
+  double stage_rates[4];
+  intmax_t total_byte_limit;
+} autotune_state_t;
+
+static const idx_t autotune_stages[] = {
+  64 * 1024,       /* 64 KB */
+  256 * 1024,      /* 256 KB */
+  1024 * 1024,     /* 1 MB */
+  4 * 1024 * 1024  /* 4 MB */
+};
+enum { NUM_AUTOTUNE_STAGES = sizeof (autotune_stages) / sizeof (autotune_stages[0]) };
+
+/* Samples transfer rate and switches block size across autotune stages */
+static void
+autotune_sample_tick (dd_context_t *ctx, autotune_state_t *at)
+{
+  if (!at->active)
+    return;
+
+  at->stage_blocks_done++;
+  xtime_t now = gethrxtime ();
+  xtime_t stage_elapsed = now - at->stage_start_time;
+
+  if (at->stage_blocks_done < 4 && (stage_elapsed < (XTIME_PRECISION / 50) || at->stage_blocks_done < 2))
+    return;
+
+  intmax_t bytes_transferred = ctx->stats.w_bytes - at->stage_bytes_start;
+  if (stage_elapsed > 0)
+    at->stage_rates[at->current_stage] = (double) bytes_transferred / ((double) stage_elapsed / XTIME_PRECISION);
+
+  at->current_stage++;
+  if (at->current_stage < NUM_AUTOTUNE_STAGES)
+    {
+      ctx->cfg.input_blocksize = autotune_stages[at->current_stage];
+      ctx->cfg.output_blocksize = autotune_stages[at->current_stage];
+      if (at->total_byte_limit >= 0)
+        {
+          intmax_t remaining = at->total_byte_limit - ctx->stats.w_bytes;
+          if (remaining > 0)
+            {
+              ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
+              ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
+            }
+        }
+      at->stage_blocks_done = 0;
+      at->stage_start_time = gethrxtime ();
+      at->stage_bytes_start = ctx->stats.w_bytes;
+    }
+  else
+    {
+      size_t best_stage = 0;
+      double best_rate = at->stage_rates[0];
+      for (size_t s = 1; s < NUM_AUTOTUNE_STAGES; s++)
+        {
+          if (at->stage_rates[s] > best_rate)
+            {
+              best_rate = at->stage_rates[s];
+              best_stage = s;
+            }
+        }
+
+      ctx->cfg.input_blocksize = autotune_stages[best_stage];
+      ctx->cfg.output_blocksize = autotune_stages[best_stage];
+      if (at->total_byte_limit >= 0)
+        {
+          intmax_t remaining = at->total_byte_limit - ctx->stats.w_bytes;
+          if (remaining > 0)
+            {
+              ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
+              ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
+            }
+        }
+      at->active = false;
+
+      if (ctx->cfg.status_level != STATUS_NONE)
+        {
+          char hbuf[LONGEST_HUMAN_READABLE + 1];
+          diagnose (0, _("autotune: selected optimal blocksize %s (measured %.1f GB/s)"),
+                    human_readable (ctx->cfg.input_blocksize, hbuf, human_opts | human_base_1024, 1, 1),
+                    best_rate / (1000.0 * 1000.0 * 1000.0));
+        }
+    }
 }
 
 static int
@@ -532,46 +731,46 @@ dd_copy (dd_context_t *ctx)
   alloc_ibuf (ctx);
   alloc_obuf (ctx);
 
-  static const idx_t autotune_stages[] = {
-    64 * 1024,       /* 64 KB */
-    256 * 1024,      /* 256 KB */
-    1024 * 1024,     /* 1 MB */
-    4 * 1024 * 1024  /* 4 MB */
-  };
-  enum { NUM_AUTOTUNE_STAGES = sizeof (autotune_stages) / sizeof (autotune_stages[0]) };
+  autotune_state_t at;
+  memset (&at, 0, sizeof at);
+  at.active = !!(ctx->cfg.conversions_mask & C_AUTOTUNE);
+  at.total_byte_limit = -1;
 
-  bool autotune_active = !!(ctx->cfg.conversions_mask & C_AUTOTUNE);
-  size_t current_stage = 0;
-  int stage_blocks_done = 0;
-  xtime_t stage_start_time = 0;
-  intmax_t stage_bytes_start = 0;
-  double stage_rates[NUM_AUTOTUNE_STAGES];
-  memset (stage_rates, 0, sizeof stage_rates);
-
-  intmax_t total_byte_limit = -1;
   if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
-    {
-      total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
-    }
+    at.total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
 
-  if (autotune_active)
+  if (at.active)
     {
-      ctx->cfg.input_blocksize = autotune_stages[0];
-      ctx->cfg.output_blocksize = autotune_stages[0];
-      if (total_byte_limit >= 0)
+      idx_t hw_in = detect_optimal_blocksize (STDIN_FILENO);
+      idx_t hw_out = detect_optimal_blocksize (STDOUT_FILENO);
+      idx_t hw_min = MAX (hw_in, hw_out);
+
+      idx_t start_bs = autotune_stages[0];
+      if (hw_min > start_bs)
         {
-          ctx->cfg.max_records = total_byte_limit / ctx->cfg.input_blocksize;
-          ctx->cfg.max_bytes = total_byte_limit % ctx->cfg.input_blocksize;
+          /* Align starting autotune stage to hardware block/optimal size */
+          while (at.current_stage + 1 < NUM_AUTOTUNE_STAGES
+                 && autotune_stages[at.current_stage] < hw_min)
+            at.current_stage++;
+          start_bs = autotune_stages[at.current_stage];
         }
-      stage_start_time = gethrxtime ();
-      stage_bytes_start = ctx->stats.w_bytes;
+
+      ctx->cfg.input_blocksize = start_bs;
+      ctx->cfg.output_blocksize = start_bs;
+      if (at.total_byte_limit >= 0)
+        {
+          ctx->cfg.max_records = at.total_byte_limit / ctx->cfg.input_blocksize;
+          ctx->cfg.max_bytes = at.total_byte_limit % ctx->cfg.input_blocksize;
+        }
+      at.stage_start_time = gethrxtime ();
+      at.stage_bytes_start = ctx->stats.w_bytes;
     }
 
   while (true)
     {
       if (active_ctx) dd_check_signals (active_ctx);
 
-      if (total_byte_limit >= 0 && ctx->stats.w_bytes >= total_byte_limit)
+      if (at.total_byte_limit >= 0 && ctx->stats.w_bytes >= at.total_byte_limit)
         break;
 
       if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records + !!ctx->cfg.max_bytes)
@@ -638,7 +837,14 @@ dd_copy (dd_context_t *ctx)
         }
 
       if (ctx->translation_needed)
-        dd_translate_buffer (ctx->ibuf, n_bytes_read);
+        {
+          if (ctx->trans_mode == TRANS_MODE_FAST_UCASE)
+            dd_vector_ucase (ctx->ibuf, n_bytes_read);
+          else if (ctx->trans_mode == TRANS_MODE_FAST_LCASE)
+            dd_vector_lcase (ctx->ibuf, n_bytes_read);
+          else
+            dd_translate_buffer (ctx->trans_table, ctx->ibuf, n_bytes_read);
+        }
 
       if (ctx->ibuf == ctx->obuf)
         {
@@ -654,70 +860,8 @@ dd_copy (dd_context_t *ctx)
           else
             ctx->stats.w_partial++;
 
-          if (autotune_active)
-            {
-              stage_blocks_done++;
-              xtime_t now = gethrxtime ();
-              xtime_t stage_elapsed = now - stage_start_time;
-
-              if (stage_blocks_done >= 4 || (stage_elapsed >= (XTIME_PRECISION / 50) && stage_blocks_done >= 2))
-                {
-                  intmax_t bytes_transferred = ctx->stats.w_bytes - stage_bytes_start;
-                  if (stage_elapsed > 0)
-                    stage_rates[current_stage] = (double) bytes_transferred / ((double) stage_elapsed / XTIME_PRECISION);
-
-                  current_stage++;
-                  if (current_stage < NUM_AUTOTUNE_STAGES)
-                    {
-                      ctx->cfg.input_blocksize = autotune_stages[current_stage];
-                      ctx->cfg.output_blocksize = autotune_stages[current_stage];
-                      if (total_byte_limit >= 0)
-                        {
-                          intmax_t remaining = total_byte_limit - ctx->stats.w_bytes;
-                          if (remaining <= 0)
-                            break;
-                          ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
-                          ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
-                        }
-                      stage_blocks_done = 0;
-                      stage_start_time = gethrxtime ();
-                      stage_bytes_start = ctx->stats.w_bytes;
-                    }
-                  else
-                    {
-                      size_t best_stage = 0;
-                      double best_rate = stage_rates[0];
-                      for (size_t s = 1; s < NUM_AUTOTUNE_STAGES; s++)
-                        {
-                          if (stage_rates[s] > best_rate)
-                            {
-                              best_rate = stage_rates[s];
-                              best_stage = s;
-                            }
-                        }
-
-                      ctx->cfg.input_blocksize = autotune_stages[best_stage];
-                      ctx->cfg.output_blocksize = autotune_stages[best_stage];
-                      if (total_byte_limit >= 0)
-                        {
-                          intmax_t remaining = total_byte_limit - ctx->stats.w_bytes;
-                          if (remaining <= 0)
-                            break;
-                          ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
-                          ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
-                        }
-                      autotune_active = false;
-
-                      if (ctx->cfg.status_level != STATUS_NONE)
-                        {
-                          char hbuf[LONGEST_HUMAN_READABLE + 1];
-                          diagnose (0, _("autotune: selected optimal blocksize %s (measured %.1f GB/s)"),
-                                    human_readable (ctx->cfg.input_blocksize, hbuf, human_opts | human_base_1024, 1, 1),
-                                    best_rate / (1000.0 * 1000.0 * 1000.0));
-                        }
-                    }
-                }
-            }
+          if (at.active)
+            autotune_sample_tick (ctx, &at);
           continue;
         }
 
@@ -732,6 +876,9 @@ dd_copy (dd_context_t *ctx)
         copy_with_unblock (ctx, bufstart, n_bytes_read);
       else
         copy_simple (ctx, bufstart, n_bytes_read);
+
+      if (at.active)
+        autotune_sample_tick (ctx, &at);
     }
 
   if (0 <= saved_byte)
@@ -772,12 +919,10 @@ dd_copy (dd_context_t *ctx)
   return exit_status;
 }
 
-int
-dd_execute (dd_context_t *ctx)
+/* Configures and opens input descriptor (stdin) with flags, readahead and seek check */
+static void
+setup_input_stream (dd_context_t *ctx)
 {
-  active_ctx = ctx;
-  int exit_status = EXIT_SUCCESS;
-
   if (ctx->cfg.input_file == NULL)
     {
       ctx->cfg.input_file = _("standard input");
@@ -798,61 +943,81 @@ dd_execute (dd_context_t *ctx)
   if (ctx->input_seekable)
     posix_fadvise (STDIN_FILENO, 0, 0, POSIX_FADV_SEQUENTIAL);
 #endif
+}
+
+/* Configures, creates, and optionally truncates output descriptor (stdout) */
+static int
+setup_output_stream (dd_context_t *ctx)
+{
+  check_target_safety (ctx);
 
   if (ctx->cfg.output_file == NULL)
     {
       ctx->cfg.output_file = _("standard output");
       set_fd_flags (STDOUT_FILENO, ctx->cfg.output_flags, ctx->cfg.output_file);
+      return EXIT_SUCCESS;
     }
-  else
+
+  mode_t perms = MODE_RW_UGO;
+  int opts = (ctx->cfg.output_flags
+              | (ctx->cfg.conversions_mask & C_NOCREAT ? 0 : O_CREAT)
+              | (ctx->cfg.conversions_mask & C_EXCL ? O_EXCL : 0)
+              | (ctx->cfg.seek_records || (ctx->cfg.conversions_mask & C_NOTRUNC) ? 0 : O_TRUNC));
+
+  off_t size;
+  if ((ckd_mul (&size, ctx->cfg.seek_records, ctx->cfg.output_blocksize)
+       || ckd_add (&size, ctx->cfg.seek_bytes, size))
+      && !(ctx->cfg.conversions_mask & C_NOTRUNC))
+    error (EXIT_FAILURE, 0,
+           _("offset too large: "
+             "cannot truncate to a length of seek=%jd"
+             " (%td-byte) blocks"),
+           ctx->cfg.seek_records, ctx->cfg.output_blocksize);
+
+  if ((! ctx->cfg.seek_records
+       || ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_RDWR | opts, perms) < 0)
+      && (ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_WRONLY | opts, perms)
+          < 0))
+    error (EXIT_FAILURE, errno, _("failed to open %s"),
+           quoteaf (ctx->cfg.output_file));
+
+  if (ctx->cfg.seek_records != 0 && !(ctx->cfg.conversions_mask & C_NOTRUNC))
     {
-      mode_t perms = MODE_RW_UGO;
-      int opts = (ctx->cfg.output_flags
-                  | (ctx->cfg.conversions_mask & C_NOCREAT ? 0 : O_CREAT)
-                  | (ctx->cfg.conversions_mask & C_EXCL ? O_EXCL : 0)
-                  | (ctx->cfg.seek_records || (ctx->cfg.conversions_mask & C_NOTRUNC) ? 0 : O_TRUNC));
-
-      off_t size;
-      if ((ckd_mul (&size, ctx->cfg.seek_records, ctx->cfg.output_blocksize)
-           || ckd_add (&size, ctx->cfg.seek_bytes, size))
-          && !(ctx->cfg.conversions_mask & C_NOTRUNC))
-        error (EXIT_FAILURE, 0,
-               _("offset too large: "
-                 "cannot truncate to a length of seek=%jd"
-                 " (%td-byte) blocks"),
-               ctx->cfg.seek_records, ctx->cfg.output_blocksize);
-
-      if ((! ctx->cfg.seek_records
-           || ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_RDWR | opts, perms) < 0)
-          && (ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_WRONLY | opts, perms)
-              < 0))
-        error (EXIT_FAILURE, errno, _("failed to open %s"),
-               quoteaf (ctx->cfg.output_file));
-
-      if (ctx->cfg.seek_records != 0 && !(ctx->cfg.conversions_mask & C_NOTRUNC))
+      if (iftruncate (STDOUT_FILENO, size) != 0)
         {
-          if (iftruncate (STDOUT_FILENO, size) != 0)
+          int ftruncate_errno = errno;
+          struct stat stdout_stat;
+          if (ifstat (STDOUT_FILENO, &stdout_stat) != 0)
             {
-              int ftruncate_errno = errno;
-              struct stat stdout_stat;
-              if (ifstat (STDOUT_FILENO, &stdout_stat) != 0)
-                {
-                  diagnose (errno, _("cannot fstat %s"), quoteaf (ctx->cfg.output_file));
-                  exit_status = EXIT_FAILURE;
-                }
-              else if (S_ISREG (stdout_stat.st_mode)
-                       || S_ISDIR (stdout_stat.st_mode)
-                       || S_TYPEISSHM (&stdout_stat))
-                {
-                  diagnose (ftruncate_errno,
-                            _("failed to truncate to %jd bytes"
-                              " in output file %s"),
-                            (intmax_t)size, quoteaf (ctx->cfg.output_file));
-                  exit_status = EXIT_FAILURE;
-                }
+              diagnose (errno, _("cannot fstat %s"), quoteaf (ctx->cfg.output_file));
+              return EXIT_FAILURE;
+            }
+          else if (S_ISREG (stdout_stat.st_mode)
+                   || S_ISDIR (stdout_stat.st_mode)
+                   || S_TYPEISSHM (&stdout_stat))
+            {
+              diagnose (ftruncate_errno,
+                        _("failed to truncate to %jd bytes"
+                          " in output file %s"),
+                        (intmax_t)size, quoteaf (ctx->cfg.output_file));
+              return EXIT_FAILURE;
             }
         }
     }
+
+  return EXIT_SUCCESS;
+}
+
+int
+dd_execute (dd_context_t *ctx)
+{
+  active_ctx = ctx;
+
+  setup_input_stream (ctx);
+
+  int exit_status = setup_output_stream (ctx);
+  if (exit_status != EXIT_SUCCESS)
+    return exit_status;
 
   ctx->stats.start_time = gethrxtime ();
   ctx->stats.next_time = ctx->stats.start_time + XTIME_PRECISION;
@@ -890,4 +1055,23 @@ dd_execute (dd_context_t *ctx)
   dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
 
   return exit_status;
+}
+
+/* Explicitly frees all allocated buffers for reusable context lifecycles */
+void
+dd_context_free (dd_context_t *ctx)
+{
+  if (!ctx)
+    return;
+
+  if (ctx->obuf && ctx->obuf != ctx->ibuf)
+    {
+      alignfree (ctx->obuf);
+      ctx->obuf = NULL;
+    }
+  if (ctx->ibuf)
+    {
+      alignfree (ctx->ibuf);
+      ctx->ibuf = NULL;
+    }
 }

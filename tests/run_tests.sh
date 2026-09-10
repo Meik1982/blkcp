@@ -88,4 +88,18 @@ AUTO_COPY2_HASH=$(sha256sum "$TMP_DIR/copy_auto2.bin" | awk '{print $1}')
 [[ "$AUTO_ORIG_HASH" == "$AUTO_COPY2_HASH" ]]
 echo "Test 14 passed: bs=auto alias bit-exact copy"
 
-echo "=== All 14 extended tests passed successfully! ==="
+# Test 15: Target Safety Guard against writing to mounted root device
+ROOT_BLK=$(df / 2>/dev/null | tail -1 | awk '{print $1}')
+if [[ -b "$ROOT_BLK" ]]; then
+  SG_OUT=$($DD_BIN if=/dev/zero of="$ROOT_BLK" count=1 2>&1 || true)
+  if echo "$SG_OUT" | grep -q "SAFETY GUARD"; then
+    echo "Test 15 passed: Target Safety Guard successfully blocked write to mounted root device"
+  else
+    echo "Test 15 failed: Safety guard did not trigger" >&2
+    exit 1
+  fi
+else
+  echo "Test 15 skipped: Root device not a block device in current environment"
+fi
+
+echo "=== All 15 extended tests passed successfully! ==="

@@ -85,6 +85,7 @@ Each CONV symbol may be:\n\
   lcase     change upper case to lower case\n\
   ucase     change lower case to upper case\n\
   sparse    try to seek rather than write the output for NUL input blocks\n\
+  autotune  dynamically benchmark and select optimal block size while copying\n\
   swab      swap every pair of input bytes\n\
   sync      pad every input block with NULs to ibs-size; when used\n\
             with block or unblock, pad with spaces rather than NULs\n\

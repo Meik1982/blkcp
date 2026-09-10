@@ -42,7 +42,8 @@ enum dd_conversions
   C_EXCL = 020000,
   C_FDATASYNC = 040000,
   C_FSYNC = 0100000,
-  C_SPARSE = 0200000
+  C_SPARSE = 0200000,
+  C_AUTOTUNE = 0400000
 };
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))

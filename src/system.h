@@ -106,41 +106,29 @@ emit_ancillary_info (char const *program)
 #define quoteaf_n(n, arg) \
   quotearg_n_style (n, shell_escape_always_quoting_style, arg)
 
-/* Efficient buffer zero-check (for conv=sparse) */
+/* Highly optimized buffer zero-check (CCAN memeqzero via vector memcmp) */
 ATTRIBUTE_PURE
 static inline bool
 is_nul (void const *buf, size_t length)
 {
-  const unsigned char *p = buf;
-  unsigned char word;
+  const unsigned char *p = (const unsigned char *) buf;
 
-  if (! length)
+  if (!length)
     return true;
 
-  while (length & (sizeof word - 1))
+  /* Check up to first 16 bytes individually */
+  size_t head = length < 16 ? length : 16;
+  for (size_t i = 0; i < head; i++)
     {
-      if (*p)
+      if (p[i])
         return false;
-      p++;
-      length--;
-      if (! length)
-        return true;
     }
 
-  for (;;)
-    {
-      memcpy (&word, p, sizeof word);
-      if (word)
-        return false;
-      p += sizeof word;
-      length -= sizeof word;
-      if (! length)
-        return true;
-      if ((length & 15) == 0)
-        break;
-    }
+  if (length <= 16)
+    return true;
 
-  return memcmp (buf, p, length) == 0;
+  /* First 16 bytes are confirmed NUL: use glibc vectorized AVX2/SSE memcmp against itself */
+  return memcmp (buf, p + 16, length - 16) == 0;
 }
 
 #endif /* DD_SYSTEM_H */

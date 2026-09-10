@@ -51,6 +51,8 @@ diagnose (int errnum, char const *fmt, ...)
   va_end (ap);
 }
 
+#define AUTOTUNE_MAX_BLOCKSIZE (4 * 1024 * 1024)
+
 static void
 alloc_ibuf (dd_context_t *ctx)
 {
@@ -58,15 +60,19 @@ alloc_ibuf (dd_context_t *ctx)
     return;
 
   char hbuf[LONGEST_HUMAN_READABLE + 1];
+  idx_t alloc_size = ctx->cfg.input_blocksize;
+  if ((ctx->cfg.conversions_mask & C_AUTOTUNE) && alloc_size < AUTOTUNE_MAX_BLOCKSIZE)
+    alloc_size = AUTOTUNE_MAX_BLOCKSIZE;
+
   bool extra_byte_for_swab = !!(ctx->cfg.conversions_mask & C_SWAB);
-  ctx->ibuf = alignalloc (ctx->page_size, ctx->cfg.input_blocksize + extra_byte_for_swab);
+  ctx->ibuf = alignalloc (ctx->page_size, alloc_size + extra_byte_for_swab);
   if (!ctx->ibuf)
     {
       error (EXIT_FAILURE, 0,
              _("memory exhausted by input buffer of size %td"
                " bytes (%s)"),
-             ctx->cfg.input_blocksize,
-             human_readable (ctx->cfg.input_blocksize, hbuf,
+             alloc_size,
+             human_readable (alloc_size, hbuf,
                              human_opts | human_base_1024, 1, 1));
     }
 }
@@ -77,18 +83,26 @@ alloc_obuf (dd_context_t *ctx)
   if (ctx->obuf)
     return;
 
-  if (ctx->cfg.conversions_mask & C_TWOBUFS)
+  bool needs_separate_buf = (ctx->cfg.conversions_mask & C_TWOBUFS)
+    && (ctx->cfg.input_blocksize != ctx->cfg.output_blocksize
+        || (ctx->cfg.conversions_mask & (C_BLOCK | C_UNBLOCK | C_SWAB)));
+
+  if (needs_separate_buf)
     {
       alloc_ibuf (ctx);
       char hbuf[LONGEST_HUMAN_READABLE + 1];
-      ctx->obuf = alignalloc (ctx->page_size, ctx->cfg.output_blocksize);
+      idx_t alloc_size = ctx->cfg.output_blocksize;
+      if ((ctx->cfg.conversions_mask & C_AUTOTUNE) && alloc_size < AUTOTUNE_MAX_BLOCKSIZE)
+        alloc_size = AUTOTUNE_MAX_BLOCKSIZE;
+
+      ctx->obuf = alignalloc (ctx->page_size, alloc_size);
       if (!ctx->obuf)
         {
           error (EXIT_FAILURE, 0,
                  _("memory exhausted by output buffer of size %td"
                    " bytes (%s)"),
-                 ctx->cfg.output_blocksize,
-                 human_readable (ctx->cfg.output_blocksize, hbuf,
+                 alloc_size,
+                 human_readable (alloc_size, hbuf,
                                  human_opts | human_base_1024, 1, 1));
         }
     }
@@ -117,7 +131,7 @@ iclose (int fd)
     int __ret; \
     do \
       { \
-        if (active_ctx) dd_process_signals (active_ctx); \
+        if (active_ctx) dd_check_signals (active_ctx); \
         __ret = (call); \
       } \
     while (__ret < 0 && errno == EINTR); \
@@ -290,7 +304,7 @@ iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
 
   while (total_written < size)
     {
-      if (active_ctx) dd_process_signals (active_ctx);
+      if (active_ctx) dd_check_signals (active_ctx);
       ssize_t nwritten = write (fd, buf + total_written, size - total_written);
       if (nwritten < 0)
         {
@@ -340,6 +354,22 @@ output_char (dd_context_t *ctx, char c)
 static void
 copy_simple (dd_context_t *ctx, char const *buf, idx_t nread)
 {
+  /* Fast path: direct write without intermediate buffer copy if aligned to output blocksize */
+  if (ctx->oc == 0 && nread == ctx->cfg.output_blocksize)
+    {
+      idx_t nwritten = iwrite (ctx, STDOUT_FILENO, buf, nread);
+      ctx->stats.w_bytes += nwritten;
+      if (nwritten != nread)
+        {
+          diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+          if (nwritten != 0)
+            ctx->stats.w_partial++;
+          exit (EXIT_FAILURE);
+        }
+      ctx->stats.w_full++;
+      return;
+    }
+
   char const *start = buf;
   do
     {
@@ -502,9 +532,47 @@ dd_copy (dd_context_t *ctx)
   alloc_ibuf (ctx);
   alloc_obuf (ctx);
 
+  static const idx_t autotune_stages[] = {
+    64 * 1024,       /* 64 KB */
+    256 * 1024,      /* 256 KB */
+    1024 * 1024,     /* 1 MB */
+    4 * 1024 * 1024  /* 4 MB */
+  };
+  enum { NUM_AUTOTUNE_STAGES = sizeof (autotune_stages) / sizeof (autotune_stages[0]) };
+
+  bool autotune_active = !!(ctx->cfg.conversions_mask & C_AUTOTUNE);
+  size_t current_stage = 0;
+  int stage_blocks_done = 0;
+  xtime_t stage_start_time = 0;
+  intmax_t stage_bytes_start = 0;
+  double stage_rates[NUM_AUTOTUNE_STAGES];
+  memset (stage_rates, 0, sizeof stage_rates);
+
+  intmax_t total_byte_limit = -1;
+  if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
+    {
+      total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
+    }
+
+  if (autotune_active)
+    {
+      ctx->cfg.input_blocksize = autotune_stages[0];
+      ctx->cfg.output_blocksize = autotune_stages[0];
+      if (total_byte_limit >= 0)
+        {
+          ctx->cfg.max_records = total_byte_limit / ctx->cfg.input_blocksize;
+          ctx->cfg.max_bytes = total_byte_limit % ctx->cfg.input_blocksize;
+        }
+      stage_start_time = gethrxtime ();
+      stage_bytes_start = ctx->stats.w_bytes;
+    }
+
   while (true)
     {
-      if (active_ctx) dd_process_signals (active_ctx);
+      if (active_ctx) dd_check_signals (active_ctx);
+
+      if (total_byte_limit >= 0 && ctx->stats.w_bytes >= total_byte_limit)
+        break;
 
       if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records + !!ctx->cfg.max_bytes)
         break;
@@ -569,6 +637,9 @@ dd_copy (dd_context_t *ctx)
           partread = 0;
         }
 
+      if (ctx->translation_needed)
+        dd_translate_buffer (ctx->ibuf, n_bytes_read);
+
       if (ctx->ibuf == ctx->obuf)
         {
           idx_t nwritten = iwrite (ctx, STDOUT_FILENO, ctx->obuf, n_bytes_read);
@@ -582,11 +653,73 @@ dd_copy (dd_context_t *ctx)
             ctx->stats.w_full++;
           else
             ctx->stats.w_partial++;
+
+          if (autotune_active)
+            {
+              stage_blocks_done++;
+              xtime_t now = gethrxtime ();
+              xtime_t stage_elapsed = now - stage_start_time;
+
+              if (stage_blocks_done >= 4 || (stage_elapsed >= (XTIME_PRECISION / 50) && stage_blocks_done >= 2))
+                {
+                  intmax_t bytes_transferred = ctx->stats.w_bytes - stage_bytes_start;
+                  if (stage_elapsed > 0)
+                    stage_rates[current_stage] = (double) bytes_transferred / ((double) stage_elapsed / XTIME_PRECISION);
+
+                  current_stage++;
+                  if (current_stage < NUM_AUTOTUNE_STAGES)
+                    {
+                      ctx->cfg.input_blocksize = autotune_stages[current_stage];
+                      ctx->cfg.output_blocksize = autotune_stages[current_stage];
+                      if (total_byte_limit >= 0)
+                        {
+                          intmax_t remaining = total_byte_limit - ctx->stats.w_bytes;
+                          if (remaining <= 0)
+                            break;
+                          ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
+                          ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
+                        }
+                      stage_blocks_done = 0;
+                      stage_start_time = gethrxtime ();
+                      stage_bytes_start = ctx->stats.w_bytes;
+                    }
+                  else
+                    {
+                      size_t best_stage = 0;
+                      double best_rate = stage_rates[0];
+                      for (size_t s = 1; s < NUM_AUTOTUNE_STAGES; s++)
+                        {
+                          if (stage_rates[s] > best_rate)
+                            {
+                              best_rate = stage_rates[s];
+                              best_stage = s;
+                            }
+                        }
+
+                      ctx->cfg.input_blocksize = autotune_stages[best_stage];
+                      ctx->cfg.output_blocksize = autotune_stages[best_stage];
+                      if (total_byte_limit >= 0)
+                        {
+                          intmax_t remaining = total_byte_limit - ctx->stats.w_bytes;
+                          if (remaining <= 0)
+                            break;
+                          ctx->cfg.max_records = (ctx->stats.r_full + ctx->stats.r_partial) + remaining / ctx->cfg.input_blocksize;
+                          ctx->cfg.max_bytes = remaining % ctx->cfg.input_blocksize;
+                        }
+                      autotune_active = false;
+
+                      if (ctx->cfg.status_level != STATUS_NONE)
+                        {
+                          char hbuf[LONGEST_HUMAN_READABLE + 1];
+                          diagnose (0, _("autotune: selected optimal blocksize %s (measured %.1f GB/s)"),
+                                    human_readable (ctx->cfg.input_blocksize, hbuf, human_opts | human_base_1024, 1, 1),
+                                    best_rate / (1000.0 * 1000.0 * 1000.0));
+                        }
+                    }
+                }
+            }
           continue;
         }
-
-      if (ctx->translation_needed)
-        dd_translate_buffer (ctx->ibuf, n_bytes_read);
 
       if (ctx->cfg.conversions_mask & C_SWAB)
         bufstart = dd_swab_buffer (ctx->ibuf, &n_bytes_read, &saved_byte);
@@ -660,6 +793,11 @@ dd_execute (dd_context_t *ctx)
   ctx->input_seekable = (0 <= offset);
   ctx->input_offset = (offset > 0 ? offset : 0);
   ctx->input_seek_errno = errno;
+
+#if HAVE_POSIX_FADVISE
+  if (ctx->input_seekable)
+    posix_fadvise (STDIN_FILENO, 0, 0, POSIX_FADV_SEQUENTIAL);
+#endif
 
   if (ctx->cfg.output_file == NULL)
     {

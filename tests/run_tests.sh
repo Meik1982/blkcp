@@ -74,4 +74,18 @@ STDERR_NONE=$($DD_BIN if="$TMP_DIR/in2" of="$TMP_DIR/out12" bs=512 count=1 statu
 [[ -z "$STDERR_NONE" ]]
 echo "Test 12 passed: status=none total silence on stderr"
 
-echo "=== All 12 extended tests passed successfully! ==="
+# Test 13: conv=autotune dynamic optimization bit-exactness
+head -c 2097152 /dev/urandom > "$TMP_DIR/rand_auto.bin"
+AUTO_ORIG_HASH=$(sha256sum "$TMP_DIR/rand_auto.bin" | awk '{print $1}')
+$DD_BIN if="$TMP_DIR/rand_auto.bin" of="$TMP_DIR/copy_auto.bin" conv=autotune status=none
+AUTO_COPY_HASH=$(sha256sum "$TMP_DIR/copy_auto.bin" | awk '{print $1}')
+[[ "$AUTO_ORIG_HASH" == "$AUTO_COPY_HASH" ]]
+echo "Test 13 passed: conv=autotune bit-exact copy"
+
+# Test 14: bs=auto syntax alias
+$DD_BIN if="$TMP_DIR/rand_auto.bin" of="$TMP_DIR/copy_auto2.bin" bs=auto status=none
+AUTO_COPY2_HASH=$(sha256sum "$TMP_DIR/copy_auto2.bin" | awk '{print $1}')
+[[ "$AUTO_ORIG_HASH" == "$AUTO_COPY2_HASH" ]]
+echo "Test 14 passed: bs=auto alias bit-exact copy"
+
+echo "=== All 14 extended tests passed successfully! ==="

@@ -20,6 +20,14 @@ void dd_install_signal_handlers (void);
 /* Check and process pending signals (SIGINT termination or SIGINFO output) */
 void dd_process_signals (dd_context_t *ctx);
 
+/* Fast inline check to avoid function call overhead in hot loops */
+static inline void
+dd_check_signals (dd_context_t *ctx)
+{
+  if (__builtin_expect (dd_interrupt_signal || dd_info_signal_count, 0))
+    dd_process_signals (ctx);
+}
+
 #ifdef __cplusplus
 }
 #endif

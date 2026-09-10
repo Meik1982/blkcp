@@ -38,6 +38,7 @@ static struct symbol_value const conversions[] =
   {"lcase", C_LCASE | C_TWOBUFS},
   {"ucase", C_UCASE | C_TWOBUFS},
   {"sparse", C_SPARSE},
+  {"autotune", C_AUTOTUNE},
   {"swab", C_SWAB | C_TWOBUFS},
   {"noerror", C_NOERROR},
   {"nocreat", C_NOCREAT},
@@ -250,6 +251,20 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
       else if (operand_is (name, "status"))
         cfg->status_level = parse_symbols (val, statuses, true,
                                           N_("invalid status level"));
+      else if (operand_is (name, "opt"))
+        {
+          if (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0))
+            cfg->conversions_mask |= C_AUTOTUNE;
+          else
+            {
+              error (0, 0, _("unrecognized operand %s"), quoteaf (name));
+              usage (EXIT_FAILURE);
+            }
+        }
+      else if (operand_is (name, "bs") && (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0)))
+        {
+          cfg->conversions_mask |= C_AUTOTUNE;
+        }
       else
         {
           strtol_error invalid = LONGINT_OK;

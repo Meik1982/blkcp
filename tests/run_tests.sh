@@ -5,7 +5,7 @@ DD_BIN="./dd"
 TMP_DIR=$(mktemp -d -t dd_test_XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "=== Running dd Compatibility Test Suite ==="
+echo "=== Running Extended dd Compatibility Test Suite ==="
 
 # Test 1: Basic stdin to stdout
 printf "hello world" | $DD_BIN status=none > "$TMP_DIR/out1"
@@ -21,8 +21,6 @@ echo "Test 2 passed: if/of with bs=512 count=2"
 # Test 3: skip and seek
 printf "0123456789ABCDEF" > "$TMP_DIR/in3"
 $DD_BIN if="$TMP_DIR/in3" of="$TMP_DIR/out3" ibs=4 obs=4 skip=1 seek=2 count=2 status=none
-# in: "0123456789ABCDEF" -> skip 4 bytes: "456789AB"
-# out: seek 2 blocks (8 bytes zero-filled) then "456789AB"
 [[ $(wc -c < "$TMP_DIR/out3") -eq 16 ]]
 echo "Test 3 passed: skip and seek block offsets"
 
@@ -56,4 +54,24 @@ COPY_HASH=$(sha256sum "$TMP_DIR/copy.bin" | awk '{print $1}')
 [[ "$ORIG_HASH" == "$COPY_HASH" ]]
 echo "Test 8 passed: 1MB block copy bit-exactness"
 
-echo "=== All 8 tests passed successfully! ==="
+# Test 9: conv=sync padding with nulls
+printf "123" | $DD_BIN ibs=8 conv=sync status=none > "$TMP_DIR/out9"
+[[ $(wc -c < "$TMP_DIR/out9") -eq 8 ]]
+echo "Test 9 passed: conv=sync padding to ibs"
+
+# Test 10: conv=block and conv=unblock
+printf "line1\nline2\n" | $DD_BIN cbs=10 conv=block status=none | $DD_BIN cbs=10 conv=unblock status=none > "$TMP_DIR/out10"
+[[ "$(<"$TMP_DIR/out10")" == $'line1\nline2' ]]
+echo "Test 10 passed: conv=block and conv=unblock roundtrip"
+
+# Test 11: iflag=count_bytes
+head -c 1024 /dev/zero | $DD_BIN iflag=count_bytes count=350 status=none > "$TMP_DIR/out11"
+[[ $(wc -c < "$TMP_DIR/out11") -eq 350 ]]
+echo "Test 11 passed: iflag=count_bytes"
+
+# Test 12: status=none suppression check
+STDERR_NONE=$($DD_BIN if="$TMP_DIR/in2" of="$TMP_DIR/out12" bs=512 count=1 status=none 2>&1 >/dev/null || true)
+[[ -z "$STDERR_NONE" ]]
+echo "Test 12 passed: status=none total silence on stderr"
+
+echo "=== All 12 extended tests passed successfully! ==="

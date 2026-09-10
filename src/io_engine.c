@@ -1,0 +1,806 @@
+#include <config.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdckdint.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "system.h"
+#include "alignalloc.h"
+#include "close-stream.h"
+#include "fd-reopen.h"
+#include "gethrxtime.h"
+#include "human.h"
+#include "ioblksize.h"
+#include "quote.h"
+#include "quotearg.h"
+#include "xtime.h"
+#include "verror.h"
+#include "error.h"
+
+#include "dd_config.h"
+#include "stats.h"
+#include "signals.h"
+#include "conversions.h"
+#include "io_engine.h"
+
+static int const human_opts =
+  (human_autoscale | human_round_to_nearest
+   | human_space_before_unit | human_SI | human_B);
+
+static dd_context_t *active_ctx = NULL;
+
+ATTRIBUTE_FORMAT ((__printf__, 2, 3))
+static void
+diagnose (int errnum, char const *fmt, ...)
+{
+  if (active_ctx && 0 < active_ctx->stats.progress_len)
+    {
+      fputc ('\n', stderr);
+      active_ctx->stats.progress_len = 0;
+    }
+
+  va_list ap;
+  va_start (ap, fmt);
+  verror (0, errnum, fmt, ap);
+  va_end (ap);
+}
+
+static void
+alloc_ibuf (dd_context_t *ctx)
+{
+  if (ctx->ibuf)
+    return;
+
+  char hbuf[LONGEST_HUMAN_READABLE + 1];
+  bool extra_byte_for_swab = !!(ctx->cfg.conversions_mask & C_SWAB);
+  ctx->ibuf = alignalloc (ctx->page_size, ctx->cfg.input_blocksize + extra_byte_for_swab);
+  if (!ctx->ibuf)
+    {
+      error (EXIT_FAILURE, 0,
+             _("memory exhausted by input buffer of size %td"
+               " bytes (%s)"),
+             ctx->cfg.input_blocksize,
+             human_readable (ctx->cfg.input_blocksize, hbuf,
+                             human_opts | human_base_1024, 1, 1));
+    }
+}
+
+static void
+alloc_obuf (dd_context_t *ctx)
+{
+  if (ctx->obuf)
+    return;
+
+  if (ctx->cfg.conversions_mask & C_TWOBUFS)
+    {
+      alloc_ibuf (ctx);
+      char hbuf[LONGEST_HUMAN_READABLE + 1];
+      ctx->obuf = alignalloc (ctx->page_size, ctx->cfg.output_blocksize);
+      if (!ctx->obuf)
+        {
+          error (EXIT_FAILURE, 0,
+                 _("memory exhausted by output buffer of size %td"
+                   " bytes (%s)"),
+                 ctx->cfg.output_blocksize,
+                 human_readable (ctx->cfg.output_blocksize, hbuf,
+                                 human_opts | human_base_1024, 1, 1));
+        }
+    }
+  else
+    {
+      alloc_ibuf (ctx);
+      ctx->obuf = ctx->ibuf;
+    }
+}
+
+static int
+iclose (int fd)
+{
+  if (close (fd) != 0)
+    do
+      if (errno != EINTR)
+        return -1;
+    while (close (fd) != 0 && errno != EBADF);
+
+  return 0;
+}
+
+static int
+ifdatasync (int fd)
+{
+  int ret;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ret = fdatasync (fd);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  return ret;
+}
+
+static int
+ifd_reopen (int desired_fd, char const *file, int flag, mode_t mode)
+{
+  int ret;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ret = fd_reopen (desired_fd, file, flag, mode);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  return ret;
+}
+
+static int
+ifstat (int fd, struct stat *st)
+{
+  int ret;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ret = fstat (fd, st);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  return ret;
+}
+
+static int
+ifsync (int fd)
+{
+  int ret;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ret = fsync (fd);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  return ret;
+}
+
+static int
+iftruncate (int fd, off_t length)
+{
+  int ret;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ret = ftruncate (fd, length);
+    }
+  while (ret < 0 && errno == EINTR);
+
+  return ret;
+}
+
+int
+dd_synchronize_output (dd_context_t *ctx)
+{
+  int exit_status = EXIT_SUCCESS;
+  int mask = ctx->cfg.conversions_mask;
+
+  if ((mask & C_FDATASYNC) && ifdatasync (STDOUT_FILENO) != 0)
+    {
+      if (errno != ENOSYS && errno != EINVAL)
+        {
+          diagnose (errno, _("fdatasync failed for %s"), quoteaf (ctx->cfg.output_file));
+          exit_status = EXIT_FAILURE;
+        }
+      mask |= C_FSYNC;
+    }
+
+  if ((mask & C_FSYNC) && ifsync (STDOUT_FILENO) != 0)
+    {
+      diagnose (errno, _("fsync failed for %s"), quoteaf (ctx->cfg.output_file));
+      return EXIT_FAILURE;
+    }
+
+  return exit_status;
+}
+
+void
+dd_engine_cleanup (dd_context_t *ctx)
+{
+  if (!dd_interrupt_signal)
+    {
+      int sync_status = dd_synchronize_output (ctx);
+      if (sync_status)
+        exit (sync_status);
+    }
+
+  if (iclose (STDIN_FILENO) != 0)
+    error (EXIT_FAILURE, errno, _("closing input file %s"),
+           quoteaf (ctx->cfg.input_file));
+
+  if (iclose (STDOUT_FILENO) != 0)
+    error (EXIT_FAILURE, errno,
+           _("closing output file %s"), quoteaf (ctx->cfg.output_file));
+}
+
+void
+dd_cleanup (void)
+{
+  if (active_ctx)
+    dd_engine_cleanup (active_ctx);
+}
+
+static off_t
+cache_round (int fd, off_t len)
+{
+  static off_t i_pending, o_pending;
+  off_t *pending = (fd == STDIN_FILENO ? &i_pending : &o_pending);
+
+  if (len)
+    {
+      intmax_t c_pending;
+      if (ckd_add (&c_pending, *pending, len))
+        c_pending = INTMAX_MAX;
+      *pending = c_pending % IO_BUFSIZE;
+      if (c_pending > *pending)
+        len = c_pending - *pending;
+      else
+        len = 0;
+    }
+  else
+    len = *pending;
+
+  return len;
+}
+
+static bool
+invalidate_cache (int fd, off_t len)
+{
+  int adv_ret = -1;
+  off_t clen = cache_round (fd, len);
+
+  if (len && !clen)
+    return true;
+
+#if HAVE_POSIX_FADVISE
+  off_t offset = lseek (fd, 0, SEEK_CUR);
+
+  if (0 <= offset)
+    {
+      off_t alloc_len = clen ? clen : 1;
+      off_t adv_start = (len ? offset - clen : 0);
+
+      adv_ret = posix_fadvise (fd, adv_start, alloc_len, POSIX_FADV_DONTNEED);
+    }
+#endif
+
+  return adv_ret != -1;
+}
+
+static void
+set_fd_flags (int fd, int add_flags, char const *name)
+{
+  int fcntl_flags = add_flags & (O_APPEND | O_NONBLOCK);
+  if (fcntl_flags)
+    {
+      int old_flags = fcntl (fd, F_GETFL);
+      if (old_flags < 0
+          || fcntl (fd, F_SETFL, old_flags | fcntl_flags) == -1)
+        error (EXIT_FAILURE, errno, _("setting flags for %s"), quoteaf (name));
+    }
+}
+
+static ssize_t
+iread (int fd, char *buf, idx_t size)
+{
+  ssize_t nread;
+  do
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      nread = read (fd, buf, size);
+    }
+  while (nread < 0 && errno == EINTR);
+
+  return nread;
+}
+
+ssize_t
+dd_iread_fullblock (int fd, char *buf, idx_t size)
+{
+  ssize_t nread = 0;
+  while (0 < size)
+    {
+      ssize_t ncurr = iread (fd, buf, size);
+      if (ncurr < 0)
+        return ncurr;
+      if (ncurr == 0)
+        break;
+      nread += ncurr;
+      buf += ncurr;
+      size -= ncurr;
+    }
+  return nread;
+}
+
+static idx_t
+iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
+{
+  idx_t total_written = 0;
+
+  if ((ctx->cfg.conversions_mask & C_SPARSE) && is_nul (buf, size))
+    {
+      off_t offset = lseek (fd, size, SEEK_CUR);
+      if (0 <= offset)
+        {
+          ctx->final_op_was_seek = true;
+          return size;
+        }
+    }
+
+  while (total_written < size)
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+      ssize_t nwritten = write (fd, buf + total_written, size - total_written);
+      if (nwritten < 0)
+        {
+          if (errno != EINTR)
+            break;
+        }
+      else if (nwritten == 0)
+        {
+          errno = ENOSPC;
+          break;
+        }
+      else
+        total_written += nwritten;
+    }
+
+  if (ctx->cfg.o_nocache && total_written)
+    invalidate_cache (fd, total_written);
+
+  return total_written;
+}
+
+static void
+write_output (dd_context_t *ctx)
+{
+  idx_t nwritten = iwrite (ctx, STDOUT_FILENO, ctx->obuf, ctx->cfg.output_blocksize);
+  ctx->stats.w_bytes += nwritten;
+  if (nwritten != ctx->cfg.output_blocksize)
+    {
+      diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+      if (nwritten != 0)
+        ctx->stats.w_partial++;
+      exit (EXIT_FAILURE);
+    }
+  else
+    ctx->stats.w_full++;
+  ctx->oc = 0;
+}
+
+static inline void
+output_char (dd_context_t *ctx, char c)
+{
+  ctx->obuf[ctx->oc++] = c;
+  if (ctx->oc >= ctx->cfg.output_blocksize)
+    write_output (ctx);
+}
+
+static void
+copy_simple (dd_context_t *ctx, char const *buf, idx_t nread)
+{
+  char const *start = buf;
+  do
+    {
+      idx_t nfree = MIN (nread, ctx->cfg.output_blocksize - ctx->oc);
+      memcpy (ctx->obuf + ctx->oc, start, nfree);
+
+      nread -= nfree;
+      start += nfree;
+      ctx->oc += nfree;
+      if (ctx->oc >= ctx->cfg.output_blocksize)
+        write_output (ctx);
+    }
+  while (nread != 0);
+}
+
+static void
+copy_with_block (dd_context_t *ctx, char const *buf, idx_t nread)
+{
+  for (idx_t i = nread; i; i--, buf++)
+    {
+      if (*buf == ctx->newline_character)
+        {
+          if (ctx->col < ctx->cfg.conversion_blocksize)
+            {
+              for (idx_t j = ctx->col; j < ctx->cfg.conversion_blocksize; j++)
+                output_char (ctx, ctx->space_character);
+            }
+          ctx->col = 0;
+        }
+      else
+        {
+          if (ctx->col == ctx->cfg.conversion_blocksize)
+            ctx->stats.r_truncate++;
+          else if (ctx->col < ctx->cfg.conversion_blocksize)
+            output_char (ctx, *buf);
+          ctx->col++;
+        }
+    }
+}
+
+static void
+copy_with_unblock (dd_context_t *ctx, char const *buf, idx_t nread)
+{
+  static idx_t pending_spaces = 0;
+
+  for (idx_t i = 0; i < nread; i++)
+    {
+      char c = buf[i];
+
+      if (ctx->col++ >= ctx->cfg.conversion_blocksize)
+        {
+          ctx->col = pending_spaces = 0;
+          i--;
+          output_char (ctx, ctx->newline_character);
+        }
+      else if (c == ctx->space_character)
+        pending_spaces++;
+      else
+        {
+          while (pending_spaces)
+            {
+              output_char (ctx, ctx->space_character);
+              --pending_spaces;
+            }
+          output_char (ctx, c);
+        }
+    }
+}
+
+static void
+advance_input_offset (dd_context_t *ctx, intmax_t offset)
+{
+  if (0 <= ctx->input_offset && ckd_add (&ctx->input_offset, ctx->input_offset, offset))
+    ctx->input_offset = -1;
+}
+
+static intmax_t
+skip (dd_context_t *ctx, int fd, char const *file, intmax_t records, idx_t blocksize, idx_t *bytes)
+{
+  off_t offset;
+  if (! ckd_mul (&offset, records, blocksize)
+      && ! ckd_add (&offset, offset, *bytes)
+      && 0 <= offset)
+    {
+      if (lseek (fd, offset, SEEK_CUR) >= 0)
+        {
+          *bytes = 0;
+          return 0;
+        }
+    }
+
+  intmax_t skipped = 0;
+  alloc_ibuf (ctx);
+  while (skipped < records)
+    {
+      ssize_t nread = iread (fd, ctx->ibuf, blocksize);
+      if (nread <= 0)
+        return records - skipped;
+      skipped++;
+    }
+  return 0;
+}
+
+static int
+dd_copy (dd_context_t *ctx)
+{
+  char *bufstart;
+  ssize_t nread;
+  idx_t partread = 0;
+  int exit_status = EXIT_SUCCESS;
+  idx_t n_bytes_read;
+  int saved_byte = -1;
+
+  if (ctx->cfg.skip_records != 0 || ctx->cfg.skip_bytes != 0)
+    {
+      intmax_t us_bytes;
+      bool us_bytes_overflow =
+        (ckd_mul (&us_bytes, ctx->cfg.skip_records, ctx->cfg.input_blocksize)
+         || ckd_add (&us_bytes, ctx->cfg.skip_bytes, us_bytes));
+      off_t input_offset0 = ctx->input_offset;
+      intmax_t us_blocks = skip (ctx, STDIN_FILENO, ctx->cfg.input_file,
+                                 ctx->cfg.skip_records, ctx->cfg.input_blocksize, &ctx->cfg.skip_bytes);
+
+      if ((us_blocks
+           || (0 <= ctx->input_offset
+               && (us_bytes_overflow
+                   || us_bytes != ctx->input_offset - input_offset0)))
+          && ctx->cfg.status_level != STATUS_NONE)
+        {
+          diagnose (0, _("%s: cannot skip to specified offset"),
+                    quotef (ctx->cfg.input_file));
+        }
+    }
+
+  if (ctx->cfg.seek_records != 0 || ctx->cfg.seek_bytes != 0)
+    {
+      intmax_t write_records = skip (ctx, STDOUT_FILENO, ctx->cfg.output_file,
+                                     ctx->cfg.seek_records, ctx->cfg.output_blocksize, &ctx->cfg.seek_bytes);
+      if (write_records != 0)
+        {
+          memset (ctx->obuf, 0, ctx->cfg.output_blocksize);
+          do
+            {
+              idx_t size = ctx->cfg.output_blocksize;
+              if (write_records == 1 && ctx->cfg.seek_bytes != 0)
+                size = ctx->cfg.seek_bytes;
+              if (iwrite (ctx, STDOUT_FILENO, ctx->obuf, size) != size)
+                {
+                  diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+                  return EXIT_FAILURE;
+                }
+            }
+          while (--write_records != 0);
+        }
+    }
+
+  if (ctx->cfg.max_records == 0 && ctx->cfg.max_bytes == 0)
+    return exit_status;
+
+  alloc_ibuf (ctx);
+  alloc_obuf (ctx);
+
+  while (true)
+    {
+      if (active_ctx) dd_process_signals (active_ctx);
+
+      if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records + !!ctx->cfg.max_bytes)
+        break;
+
+      if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records)
+        nread = (ctx->iread_fnc ? ctx->iread_fnc : iread) (STDIN_FILENO, ctx->ibuf, ctx->cfg.max_bytes);
+      else
+        nread = (ctx->iread_fnc ? ctx->iread_fnc : iread) (STDIN_FILENO, ctx->ibuf, ctx->cfg.input_blocksize);
+
+      if (nread > 0)
+        {
+          advance_input_offset (ctx, nread);
+          if (ctx->cfg.i_nocache)
+            invalidate_cache (STDIN_FILENO, nread);
+        }
+      else if (nread == 0)
+        {
+          ctx->cfg.i_nocache_eof |= ctx->cfg.i_nocache;
+          ctx->cfg.o_nocache_eof |= ctx->cfg.o_nocache && ! (ctx->cfg.conversions_mask & C_NOTRUNC);
+          break;
+        }
+      else
+        {
+          if (!(ctx->cfg.conversions_mask & C_NOERROR) || ctx->cfg.status_level != STATUS_NONE)
+            diagnose (errno, _("error reading %s"), quoteaf (ctx->cfg.input_file));
+
+          if (ctx->cfg.conversions_mask & C_NOERROR)
+            {
+              dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+              idx_t bad_portion = ctx->cfg.input_blocksize - partread;
+              invalidate_cache (STDIN_FILENO, bad_portion);
+              if ((ctx->cfg.conversions_mask & C_SYNC) && !partread)
+                nread = 0;
+              else
+                continue;
+            }
+          else
+            {
+              exit_status = EXIT_FAILURE;
+              break;
+            }
+        }
+
+      n_bytes_read = nread;
+
+      if (n_bytes_read < ctx->cfg.input_blocksize)
+        {
+          ctx->stats.r_partial++;
+          partread = n_bytes_read;
+          if (ctx->cfg.conversions_mask & C_SYNC)
+            {
+              if (!(ctx->cfg.conversions_mask & C_NOERROR))
+                memset (ctx->ibuf + n_bytes_read,
+                        (ctx->cfg.conversions_mask & (C_BLOCK | C_UNBLOCK)) ? ' ' : '\0',
+                        ctx->cfg.input_blocksize - n_bytes_read);
+              n_bytes_read = ctx->cfg.input_blocksize;
+            }
+        }
+      else
+        {
+          ctx->stats.r_full++;
+          partread = 0;
+        }
+
+      if (ctx->ibuf == ctx->obuf)
+        {
+          idx_t nwritten = iwrite (ctx, STDOUT_FILENO, ctx->obuf, n_bytes_read);
+          ctx->stats.w_bytes += nwritten;
+          if (nwritten != n_bytes_read)
+            {
+              diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+              return EXIT_FAILURE;
+            }
+          else if (n_bytes_read == ctx->cfg.input_blocksize)
+            ctx->stats.w_full++;
+          else
+            ctx->stats.w_partial++;
+          continue;
+        }
+
+      if (ctx->translation_needed)
+        dd_translate_buffer (ctx->ibuf, n_bytes_read);
+
+      if (ctx->cfg.conversions_mask & C_SWAB)
+        bufstart = dd_swab_buffer (ctx->ibuf, &n_bytes_read, &saved_byte);
+      else
+        bufstart = ctx->ibuf;
+
+      if (ctx->cfg.conversions_mask & C_BLOCK)
+        copy_with_block (ctx, bufstart, n_bytes_read);
+      else if (ctx->cfg.conversions_mask & C_UNBLOCK)
+        copy_with_unblock (ctx, bufstart, n_bytes_read);
+      else
+        copy_simple (ctx, bufstart, n_bytes_read);
+    }
+
+  if (0 <= saved_byte)
+    {
+      char saved_char = saved_byte;
+      if (ctx->cfg.conversions_mask & C_BLOCK)
+        copy_with_block (ctx, &saved_char, 1);
+      else if (ctx->cfg.conversions_mask & C_UNBLOCK)
+        copy_with_unblock (ctx, &saved_char, 1);
+      else
+        copy_simple (ctx, &saved_char, 1);
+    }
+
+  if (ctx->col && (ctx->cfg.conversions_mask & C_BLOCK))
+    {
+      for (idx_t j = ctx->col; j < ctx->cfg.conversion_blocksize; j++)
+        output_char (ctx, ctx->space_character);
+    }
+
+  if (ctx->col && (ctx->cfg.conversions_mask & C_UNBLOCK))
+    {
+      output_char (ctx, ctx->newline_character);
+    }
+
+  if (ctx->oc > 0)
+    {
+      idx_t nwritten = iwrite (ctx, STDOUT_FILENO, ctx->obuf, ctx->oc);
+      ctx->stats.w_bytes += nwritten;
+      if (nwritten != ctx->oc)
+        {
+          diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+          return EXIT_FAILURE;
+        }
+      if (nwritten != 0)
+        ctx->stats.w_partial++;
+    }
+
+  return exit_status;
+}
+
+int
+dd_execute (dd_context_t *ctx)
+{
+  active_ctx = ctx;
+  int exit_status = EXIT_SUCCESS;
+
+  if (ctx->cfg.input_file == NULL)
+    {
+      ctx->cfg.input_file = _("standard input");
+      set_fd_flags (STDIN_FILENO, ctx->cfg.input_flags, ctx->cfg.input_file);
+    }
+  else
+    {
+      if (ifd_reopen (STDIN_FILENO, ctx->cfg.input_file, O_RDONLY | ctx->cfg.input_flags, 0) < 0)
+        error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.input_file));
+    }
+
+  off_t offset = lseek (STDIN_FILENO, 0, SEEK_CUR);
+  ctx->input_seekable = (0 <= offset);
+  ctx->input_offset = (offset > 0 ? offset : 0);
+  ctx->input_seek_errno = errno;
+
+  if (ctx->cfg.output_file == NULL)
+    {
+      ctx->cfg.output_file = _("standard output");
+      set_fd_flags (STDOUT_FILENO, ctx->cfg.output_flags, ctx->cfg.output_file);
+    }
+  else
+    {
+      mode_t perms = MODE_RW_UGO;
+      int opts = (ctx->cfg.output_flags
+                  | (ctx->cfg.conversions_mask & C_NOCREAT ? 0 : O_CREAT)
+                  | (ctx->cfg.conversions_mask & C_EXCL ? O_EXCL : 0)
+                  | (ctx->cfg.seek_records || (ctx->cfg.conversions_mask & C_NOTRUNC) ? 0 : O_TRUNC));
+
+      off_t size;
+      if ((ckd_mul (&size, ctx->cfg.seek_records, ctx->cfg.output_blocksize)
+           || ckd_add (&size, ctx->cfg.seek_bytes, size))
+          && !(ctx->cfg.conversions_mask & C_NOTRUNC))
+        error (EXIT_FAILURE, 0,
+               _("offset too large: "
+                 "cannot truncate to a length of seek=%jd"
+                 " (%td-byte) blocks"),
+               ctx->cfg.seek_records, ctx->cfg.output_blocksize);
+
+      if ((! ctx->cfg.seek_records
+           || ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_RDWR | opts, perms) < 0)
+          && (ifd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_WRONLY | opts, perms)
+              < 0))
+        error (EXIT_FAILURE, errno, _("failed to open %s"),
+               quoteaf (ctx->cfg.output_file));
+
+      if (ctx->cfg.seek_records != 0 && !(ctx->cfg.conversions_mask & C_NOTRUNC))
+        {
+          if (iftruncate (STDOUT_FILENO, size) != 0)
+            {
+              int ftruncate_errno = errno;
+              struct stat stdout_stat;
+              if (ifstat (STDOUT_FILENO, &stdout_stat) != 0)
+                {
+                  diagnose (errno, _("cannot fstat %s"), quoteaf (ctx->cfg.output_file));
+                  exit_status = EXIT_FAILURE;
+                }
+              else if (S_ISREG (stdout_stat.st_mode)
+                       || S_ISDIR (stdout_stat.st_mode)
+                       || S_TYPEISSHM (&stdout_stat))
+                {
+                  diagnose (ftruncate_errno,
+                            _("failed to truncate to %jd bytes"
+                              " in output file %s"),
+                            (intmax_t)size, quoteaf (ctx->cfg.output_file));
+                  exit_status = EXIT_FAILURE;
+                }
+            }
+        }
+    }
+
+  ctx->stats.start_time = gethrxtime ();
+  ctx->stats.next_time = ctx->stats.start_time + XTIME_PRECISION;
+
+  exit_status = dd_copy (ctx);
+
+  int sync_status = dd_synchronize_output (ctx);
+  if (sync_status)
+    exit_status = sync_status;
+
+  if (ctx->cfg.max_records == 0 && ctx->cfg.max_bytes == 0)
+    {
+      if (ctx->cfg.i_nocache && !invalidate_cache (STDIN_FILENO, 0))
+        {
+          diagnose (errno, _("failed to discard cache for: %s"),
+                    quotef (ctx->cfg.input_file));
+          exit_status = EXIT_FAILURE;
+        }
+      if (ctx->cfg.o_nocache && !invalidate_cache (STDOUT_FILENO, 0))
+        {
+          diagnose (errno, _("failed to discard cache for: %s"),
+                    quotef (ctx->cfg.output_file));
+          exit_status = EXIT_FAILURE;
+        }
+    }
+  else
+    {
+      if (ctx->cfg.i_nocache || ctx->cfg.i_nocache_eof)
+        invalidate_cache (STDIN_FILENO, 0);
+      if (ctx->cfg.o_nocache || ctx->cfg.o_nocache_eof)
+        invalidate_cache (STDOUT_FILENO, 0);
+    }
+
+  dd_engine_cleanup (ctx);
+  dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+
+  return exit_status;
+}

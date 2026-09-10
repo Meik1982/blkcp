@@ -1,6 +1,6 @@
-# dd (Standalone Edition)
+# dd (Modular Edition)
 
-Eine eigenständige, isolierte Kopie des klassischen Unix-/Linux-Tools `dd`.
+Eine eigenständige, modularisierte und architektonisch entflochtene Version des klassischen Unix-/Linux-Tools `dd`.
 
 ---
 
@@ -13,39 +13,39 @@ Eine eigenständige, isolierte Kopie des klassischen Unix-/Linux-Tools `dd`.
 * **Originalautoren:** Paul Rubin, David MacKenzie, Stuart Kemp und die Free Software Foundation, Inc.
 * **Lizenz:** GNU General Public License v3 oder neuer (GPLv3+). Siehe <https://gnu.org/licenses/gpl.html>.
 
-Dieses Projekt extrahiert den Code von `dd` aus dem monolithischen GNU Coreutils-Buildsystem, um eine autark baubare, leicht verständliche und modular veränderbare Basis für zukünftige Optimierungen und Modernisierungen bereitzustellen. Der Quelltext in `src/dd.c` ist im Originalzustand belassen worden.
+---
+
+## 2. Modulare Architektur
+
+Der ursprüngliche 2.563-Zeilen-Monolith `dd.c` wurde vollständig in getrennte, reentrante Subsysteme zerlegt:
+
+```
+src/
+├── dd.c              # Schlanke Einstiegs- und Ablaufsteuerung (~165 Zeilen)
+├── dd_config.h       # Vollständige Kapselung von Zustand & Konfiguration (dd_context_t)
+├── args.h / .c       # Operanden- & CLI-Parsing (if=, of=, bs=, Multiplikatoren, Validierung)
+├── io_engine.h / .c  # I/O-Pipeline, Blockpufferung, Direct-I/O & Fsync-Synchronisation
+├── conversions.h / .c# Zeichensatz- (EBCDIC/ASCII/Case) und Byte-Konvertierungen (swab)
+├── stats.h / .c      # Durchsatz-Telemetrie, Human-readable Formatierung & Records-Reporting
+├── signals.h / .c    # Signal-Handler (SIGINT-Cleanup, SIGINFO/SIGUSR1-Reporting)
+└── system.h          # POSIX-Systemschnittstellen mit Include-Guards
+```
+
+### Kern-Verbesserungen:
+1. **Kein verstreuter globaler Zustand:** Alle Konfigurations- und Laufzeitvariablen liegen zentral in `dd_context_t` / `dd_config_t`.
+2. **100 % Schnittstellen-Kompatibilität:** Sämtliche CLI-Flags, Operanden, Signal-Trigger (`SIGUSR1`) und `stderr`-Ausgaben verhalten sich bit- und formatidentisch zum GNU-Standard.
+3. **Erweiterbarkeit:** Die I/O-Engine ist isoliert und vorbereitet für moderne Backends (wie `io_uring` oder Multi-Threaded Double-Buffering).
 
 ---
 
-## 2. Projektstruktur
-
-```
-.
-├── Makefile          # Schlankes, autarkes Makefile
-├── README.md         # Diese Dokumentation & Herkunftsnachweis
-├── include/          # Notwendige Header (POSIX/Gnulib-Kompatibilität & Interfaces)
-├── lib/
-│   └── libcoreutils.a# Extrahierte Hilfsroutinen (Gnulib / Coreutils-Subsysteme)
-└── src/
-    ├── dd.c          # Der originale Quellcode von dd (GNU Coreutils 9.5)
-    ├── version.c     # Versionsdeklarationen
-    ├── system.h      # System- und Plattform-Header
-    └── ...
-```
-
----
-
-## 3. Bauen & Ausführen
-
-Voraussetzung ist ein C-Compiler (`gcc` oder `clang`) sowie GNU Make.
+## 3. Bauen & Testen
 
 ```bash
-# Bauen
+# Kompilieren
 make
 
-# Ausführen
-./dd --version
-./dd --help
+# Erweiterte Kompatibilitäts-Testsuite ausführen (12 Kernszenarien)
+./tests/run_tests.sh
 
 # Aufräumen
 make clean

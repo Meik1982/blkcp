@@ -104,12 +104,27 @@ sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
 ## 5. Bauen, Testen & Benchmarking
 
-### Kompilieren
+### Kompilieren & Standard-Targets
 ```bash
-# Release-Build
+# Release-Build kompilieren
 make clean all
+
+# Alle 16 Regressionstests ausführen
+make test
+
+# Vergleichs-Benchmark gegen GNU dd ausführen
+make benchmark
+
+# Manpage anzeigen
+make man
 ```
 *Das Makefile unterstützt automatische Header-Dependency-Verfolgung (`-MMD -MP`).*
+
+### Offizielle UNIX-Manpage
+Die vollständige Spezifikation aller Schalter, Flags, Conversions und Sicherheitsmechanismen liegt unter `man/dd.1`:
+```bash
+man -l man/dd.1
+```
 
 ### Regressionstest-Suite (16 Tests)
 ```bash

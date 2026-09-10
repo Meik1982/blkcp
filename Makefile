@@ -21,4 +21,13 @@ $(TARGET): $(OBJS)
 clean:
 	rm -f $(OBJS) $(DEPS) $(TARGET)
 
-.PHONY: all clean
+test: $(TARGET)
+	./tests/run_tests.sh
+
+benchmark: $(TARGET)
+	./tests/benchmark_compare.sh
+
+man:
+	man -l man/dd.1
+
+.PHONY: all clean test benchmark man

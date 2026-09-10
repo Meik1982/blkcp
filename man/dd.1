@@ -1,0 +1,185 @@
+.TH DD 1 "September 2026" "Modular dd (Optimized Edition)" "User Commands"
+.SH NAME
+dd \- convert and copy a file with dynamic autotuning, streaming hash and safety guards
+.SH SYNOPSIS
+.B dd
+[\fI\,OPERAND\/\fR]...
+.br
+.B dd
+\fI\,OPTION\/\fR
+.SH DESCRIPTION
+Copy a file, converting and formatting according to the operands.
+.PP
+Unlike traditional implementations, this modular and optimized edition provides dynamic in-flight I/O autotuning, zero-copy fast paths, SIMD-accelerated transformations, hardware block-size awareness, streaming SHA-256 integrity verification, and target safety guardrails against accidental host system destruction.
+.TP
+\fBbs\fR=\fI\,BYTES\/\fR
+Read and write up to \fI\,BYTES\/\fR bytes at a time (default: 512). Overrides \fBibs\fR and \fBobs\fR. If set to \fBauto\fR (\fBbs=auto\fR), the engine autonomously benchmarks and tunes the optimal block size during the first milliseconds of transfer.
+.TP
+\fBcbs\fR=\fI\,BYTES\/\fR
+Convert \fI\,BYTES\/\fR bytes at a time.
+.TP
+\fBconv\fR=\fI\,CONVS\/\fR
+Convert the file as per the comma separated symbol list.
+.TP
+\fBcount\fR=\fI\,N\/\fR
+Copy only \fI\,N\/\fR input blocks.
+.TP
+\fBibs\fR=\fI\,BYTES\/\fR
+Read up to \fI\,BYTES\/\fR bytes at a time (default: 512).
+.TP
+\fBif\fR=\fI\,FILE\/\fR
+Read from \fI\,FILE\/\fR instead of standard input.
+.TP
+\fBiflag\fR=\fI\,FLAGS\/\fR
+Read as per the comma separated symbol list.
+.TP
+\fBobs\fR=\fI\,BYTES\/\fR
+Write \fI\,BYTES\/\fR bytes at a time (default: 512).
+.TP
+\fBof\fR=\fI\,FILE\/\fR
+Write to \fI\,FILE\/\fR instead of standard output.
+.TP
+\fBoflag\fR=\fI\,FLAGS\/\fR
+Write as per the comma separated symbol list.
+.TP
+\fBopt\fR=\fI\,FEATURE\/\fR
+Modern optimizer feature switch (\fBauto\fR, \fBforce\fR, \fBsha256\fR).
+.TP
+\fBseek\fR=\fI\,N\/\fR
+(or \fBoseek\fR=\fI\,N\/\fR) Skip \fI\,N\/\fR \fBobs\fR-sized output blocks.
+.TP
+\fBskip\fR=\fI\,N\/\fR
+(or \fBiseek\fR=\fI\,N\/\fR) Skip \fI\,N\/\fR \fBibs\fR-sized input blocks.
+.TP
+\fBstatus\fR=\fI\,LEVEL\/\fR
+The LEVEL of information to print to stderr:
+\fBnone\fR suppresses everything but error messages;
+\fBnoxfer\fR suppresses the final transfer statistics;
+\fBprogress\fR shows periodic periodic transfer statistics.
+.SH CONVERSION SYMBOLS
+.TP
+\fBascii\fR
+Convert EBCDIC to ASCII.
+.TP
+\fBebcdic\fR
+Convert ASCII to EBCDIC.
+.TP
+\fBibm\fR
+Convert ASCII to alternate EBCDIC.
+.TP
+\fBblock\fR
+Pad newline-terminated records with spaces to \fBcbs\fR-size.
+.TP
+\fBunblock\fR
+Replace trailing spaces in \fBcbs\fR-size records with newline.
+.TP
+\fBlcase\fR
+Change upper case to lower case (SIMD-accelerated on ASCII streams).
+.TP
+\fBucase\fR
+Change lower case to upper case (SIMD-accelerated on ASCII streams).
+.TP
+\fBsparse\fR
+Try to seek rather than write the output for NUL input blocks (vector-optimized).
+.TP
+\fBautotune\fR
+Dynamically benchmark and select optimal block size while copying.
+.TP
+\fBsha256\fR, \fBhash\fR
+Compute and print streaming SHA-256 digest on-the-fly without an extra I/O pass.
+.TP
+\fBforce\fR
+Override target safety guard when writing to devices containing mounted system roots.
+.TP
+\fBswab\fR
+Swap every pair of input bytes.
+.TP
+\fBsync\fR
+Pad every input block with NULs to \fBibs\fR-size.
+.TP
+\fBexcl\fR
+Fail if the output file already exists.
+.TP
+\fBnocreat\fR
+Do not create the output file.
+.TP
+\fBnotrunc\fR
+Do not truncate the output file.
+.TP
+\fBnoerror\fR
+Continue after read errors.
+.TP
+\fBfdatasync\fR
+Physically write output file data before finishing.
+.TP
+\fBfsync\fR
+Likewise, but also write metadata.
+.SH FLAG SYMBOLS
+.TP
+\fBappend\fR
+Append mode (makes sense only for output; \fBconv=notrunc\fR suggested).
+.TP
+\fBdirect\fR
+Use direct I/O for data, bypassing the OS page cache.
+.TP
+\fBdirectory\fR
+Fail unless a directory.
+.TP
+\fBdsync\fR
+Use synchronized I/O for data.
+.TP
+\fBsync\fR
+Likewise, but also for metadata.
+.TP
+\fBnonblock\fR
+Use non-blocking I/O.
+.TP
+\fBnoatime\fR
+Do not update access time.
+.TP
+\fBnocache\fR
+Request to discard cache.
+.TP
+\fBnoctty\fR
+Do not assign controlling terminal from file.
+.TP
+\fBnofollow\fR
+Do not follow symlinks.
+.TP
+\fBcount_bytes\fR
+Treat 'count=N' as a byte count (iflag only).
+.TP
+\fBskip_bytes\fR
+Treat 'skip=N' as a byte count (iflag only).
+.TP
+\fBseek_bytes\fR
+Treat 'seek=N' as a byte count (oflag only).
+.TP
+\fBforce\fR
+Override target safety guard check against overwriting mounted system roots.
+.SH TARGET SAFETY GUARD
+When writing to raw block devices (\fBS_ISBLK\fR), \fBdd\fR cross-references the device number against active mounts in \fB/proc/mounts\fR. If the destination targets the host root (\fB/\fR), \fB/boot\fR, or \fB/home\fR filesystems, execution is aborted immediately to prevent fatal data loss ("Disk Destroyer syndrome").
+To bypass this protection in emergency/rescue situations, supply \fBoflag=force\fR, \fBconv=force\fR, or \fBopt=force\fR.
+.SH EXAMPLES
+.PP
+Flash a Linux OS image to a USB stick with dynamic throughput autotuning and immediate verification:
+.RS
+.B dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
+.RE
+.PP
+Copy random test stream with 1 GB limit and exact byte counting:
+.RS
+.B dd if=/dev/urandom of=test.bin count=1G iflag=count_bytes bs=auto
+.RE
+.PP
+Create a 10 GB sparse file:
+.RS
+.B dd if=/dev/zero of=sparse.img bs=1M seek=10240 count=0
+.RE
+.SH SIGNALS
+Sending a \fBSIGUSR1\fR signal to a running \fBdd\fR process makes it print I/O statistics to standard error and resume copying.
+.SH AUTHORS
+Written by Paul Rubin, David MacKenzie, Stuart Kemp, and modularized/optimized in 2026.
+.SH SEE ALSO
+.BR cp (1),
+.BR sha256sum (1)

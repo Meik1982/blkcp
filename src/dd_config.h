@@ -93,90 +93,99 @@ enum dd_private_flags
     O_FORCE = FFS_MASK (v6_mask)
   };
 
-/* Configuration parsed from CLI operands */
+/**
+ * @brief Configuration parsed from CLI operands (if=, of=, bs=, count=, conv=, etc.)
+ */
 typedef struct dd_config
 {
-  char const *input_file;
-  char const *output_file;
-  idx_t input_blocksize;
-  idx_t output_blocksize;
-  idx_t conversion_blocksize;
-  intmax_t skip_records;
-  idx_t skip_bytes;
-  intmax_t seek_records;
-  intmax_t seek_bytes;
-  intmax_t max_records;
-  idx_t max_bytes;
-  int conversions_mask;
-  int input_flags;
-  int output_flags;
-  int status_level;
-  bool i_nocache;
-  bool o_nocache;
-  bool i_nocache_eof;
-  bool o_nocache_eof;
+  char const *input_file;         /**< Path to input file or device (NULL for stdin) */
+  char const *output_file;        /**< Path to output file or device (NULL for stdout) */
+  idx_t input_blocksize;          /**< Block size for read operations (ibs) */
+  idx_t output_blocksize;         /**< Block size for write operations (obs) */
+  idx_t conversion_blocksize;     /**< Record length for block/unblock conversion (cbs) */
+  intmax_t skip_records;          /**< Input blocks to skip before copying */
+  idx_t skip_bytes;               /**< Additional bytes to skip when iflag=skip_bytes */
+  intmax_t seek_records;          /**< Output blocks to seek before writing */
+  intmax_t seek_bytes;            /**< Additional bytes to seek when oflag=seek_bytes */
+  intmax_t max_records;           /**< Max records to copy (from count=N) */
+  idx_t max_bytes;                /**< Remaining bytes to copy when iflag=count_bytes */
+  int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
+  int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
+  int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */
+  int status_level;               /**< Telemetry verbosity (none, noxfer, progress, default) */
+  bool i_nocache;                 /**< Discard input cache after every block read */
+  bool o_nocache;                 /**< Discard output cache after every block write */
+  bool i_nocache_eof;             /**< Discard entire input cache at EOF */
+  bool o_nocache_eof;             /**< Discard entire output cache at completion */
 } dd_config_t;
 
-/* Transfer statistics & telemetry */
+/**
+ * @brief Transfer statistics, timing and progress telemetry
+ */
 typedef struct dd_stats
 {
-  intmax_t r_full;
-  intmax_t r_partial;
-  intmax_t r_truncate;
-  intmax_t w_full;
-  intmax_t w_partial;
-  intmax_t w_bytes;
-  intmax_t reported_w_bytes;
-  xtime_t start_time;
-  xtime_t next_time;
-  int progress_len;
+  intmax_t r_full;                /**< Complete input blocks read */
+  intmax_t r_partial;             /**< Partial input blocks read */
+  intmax_t r_truncate;            /**< Records truncated by cbs limit */
+  intmax_t w_full;                /**< Complete output blocks written */
+  intmax_t w_partial;             /**< Partial output blocks written */
+  intmax_t w_bytes;               /**< Cumulative bytes written to output */
+  intmax_t reported_w_bytes;      /**< Bytes reported in previous progress update */
+  xtime_t start_time;             /**< Transfer start timestamp (nanoseconds via TSC) */
+  xtime_t next_time;              /**< Next scheduled periodic progress report time */
+  int progress_len;               /**< Character length of last printed progress line */
 } dd_stats_t;
 
+/**
+ * @brief Translation execution modes for optimized character transformation
+ */
 enum dd_trans_mode
 {
-  TRANS_MODE_NONE = 0,
-  TRANS_MODE_TABLE,
-  TRANS_MODE_FAST_UCASE,
-  TRANS_MODE_FAST_LCASE
+  TRANS_MODE_NONE = 0,            /**< No translation needed */
+  TRANS_MODE_TABLE,               /**< Standard 256-byte lookup table translation */
+  TRANS_MODE_FAST_UCASE,          /**< Branchless SIMD-vectorized ASCII upper-casing */
+  TRANS_MODE_FAST_LCASE           /**< Branchless SIMD-vectorized ASCII lower-casing */
 };
 
-/* Complete runtime context */
+/**
+ * @brief Complete reentrant runtime context for execution, state, and signals
+ */
 typedef struct dd_context
 {
-  dd_config_t cfg;
-  dd_stats_t stats;
+  dd_config_t cfg;                /**< Parsed command line options and switches */
+  dd_stats_t stats;               /**< Transfer statistics and execution timing */
 
   /* Runtime buffer state */
-  idx_t page_size;
-  char *ibuf;
-  char *obuf;
-  idx_t oc;
-  idx_t col;
+  idx_t page_size;                /**< OS memory page size for buffer alignment */
+  char *ibuf;                     /**< Input read buffer (aligned via alignalloc) */
+  char *obuf;                     /**< Output write buffer (shares ibuf on fast path) */
+  idx_t oc;                       /**< Current byte count accumulated in obuf */
+  idx_t col;                      /**< Current column index for block/unblock conversion */
 
   /* I/O descriptors and status */
-  bool input_seekable;
-  int input_seek_errno;
-  off_t input_offset;
-  bool final_op_was_seek;
-  bool warn_partial_read;
-  bool translation_needed;
-  int trans_mode;
-  char newline_character;
-  char space_character;
-  unsigned char trans_table[256];
-  idx_t pending_spaces;
+  bool input_seekable;            /**< True if input supports lseek(SEEK_CUR) */
+  int input_seek_errno;           /**< Errno captured when initial lseek failed */
+  off_t input_offset;             /**< Byte offset in input file */
+  bool final_op_was_seek;         /**< True if last write was sparse lseek forward */
+  bool warn_partial_read;         /**< Warn on short reads before EOF */
+  bool translation_needed;        /**< True if character translation is active */
+  int trans_mode;                 /**< Active transformation mode (enum dd_trans_mode) */
+  char newline_character;         /**< Active newline character representation */
+  char space_character;           /**< Active space character representation */
+  unsigned char trans_table[256]; /**< Reentrant 256-byte charset translation table */
+  idx_t pending_spaces;           /**< State tracker for unblock space expansion */
 
   /* Signal state */
-  sig_atomic_t volatile interrupt_signal;
-  sig_atomic_t volatile info_signal_count;
+  sig_atomic_t volatile interrupt_signal; /**< SIGINT/SIGTERM cancellation flag */
+  sig_atomic_t volatile info_signal_count;/**< Pending SIGINFO/SIGUSR1 request count */
 
   /* Dynamic function pointers */
-  ssize_t (*iread_fnc) (int fd, char *buf, idx_t size);
+  ssize_t (*iread_fnc) (int fd, char *buf, idx_t size); /**< Custom reader routine */
 
   /* On-the-fly checksumming state */
-  struct sha256_ctx sha_ctx;
-  unsigned char sha_digest[32];
-  bool sha_computed;
+  struct sha256_ctx sha_ctx;      /**< Streaming SHA-256 computation state */
+  unsigned char sha_digest[32];   /**< Final 256-bit binary hash digest */
+  bool sha_computed;              /**< Set to true when hash computation finalized */
 } dd_context_t;
 
 /* Global or thread-local active context pointer for signal handling */

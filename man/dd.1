@@ -43,7 +43,7 @@ Write to \fI\,FILE\/\fR instead of standard output.
 Write as per the comma separated symbol list.
 .TP
 \fBopt\fR=\fI\,FEATURE\/\fR
-Modern optimizer feature switch (\fBauto\fR, \fBforce\fR, \fBsha256\fR).
+Modern optimizer feature switch (\fBauto\fR, \fBforce\fR, \fBsha256\fR, \fBasync\fR). Can be comma-separated (e.g. \fBopt=async,hash\fR).
 .TP
 \fBseek\fR=\fI\,N\/\fR
 (or \fBoseek\fR=\fI\,N\/\fR) Skip \fI\,N\/\fR \fBobs\fR-sized output blocks.
@@ -90,6 +90,9 @@ Compute and print streaming SHA-256 digest on-the-fly without an extra I/O pass.
 .TP
 \fBforce\fR
 Override target safety guard when writing to devices containing mounted system roots.
+.TP
+\fBasync\fR
+Enable multi-threaded reader/writer double-buffering pipeline (asynchronous Ringbuffer).
 .TP
 \fBswab\fR
 Swap every pair of input bytes.
@@ -157,6 +160,9 @@ Treat 'seek=N' as a byte count (oflag only).
 .TP
 \fBforce\fR
 Override target safety guard check against overwriting mounted system roots.
+.TP
+\fBasync\fR
+Enable multi-threaded reader/writer double-buffering pipeline.
 .SH TARGET SAFETY GUARD
 When writing to raw block devices (\fBS_ISBLK\fR), \fBdd\fR cross-references the device number against active mounts in \fB/proc/mounts\fR. If the destination targets the host root (\fB/\fR), \fB/boot\fR, or \fB/home\fR filesystems, execution is aborted immediately to prevent fatal data loss ("Disk Destroyer syndrome").
 To bypass this protection in emergency/rescue situations, supply \fBoflag=force\fR, \fBconv=force\fR, or \fBopt=force\fR.

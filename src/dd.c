@@ -62,7 +62,7 @@ Copy a file, converting and formatting according to the operands.\n\
   obs=BYTES       write BYTES bytes at a time (default: 512)\n\
   of=FILE         write to FILE instead of stdout\n\
   oflag=FLAGS     write as per the comma separated symbol list\n\
-  opt=FEATURE     enable modern extensions ('auto', 'force', 'sha256')\n\
+  opt=FEATURE     enable modern extensions ('auto', 'force', 'sha256', 'async')\n\
   seek=N          (or oseek=N) skip N obs-sized output blocks\n\
   skip=N          (or iseek=N) skip N ibs-sized input blocks\n\
   status=LEVEL    The LEVEL of information to print to stderr;\n\
@@ -89,6 +89,7 @@ Each CONV symbol may be:\n\
   autotune  dynamically benchmark and select optimal block size while copying\n\
   sha256    compute streaming SHA-256 digest on-the-fly while copying\n\
   force     override safety guard protection when writing to system devices\n\
+  async     enable multi-threaded reader/writer double-buffering pipeline\n\
   swab      swap every pair of input bytes\n\
   sync      pad every input block with NULs to ibs-size; when used\n\
             with block or unblock, pad with spaces rather than NULs\n\
@@ -115,6 +116,7 @@ Each FLAG symbol may be:\n\
   skip_bytes   treat 'skip=N' as a byte count (iflag only)\n\
   seek_bytes   treat 'seek=N' as a byte count (oflag only)\n\
   force        override safety guard check against overwriting mounted system roots\n\
+  async        enable multi-threaded reader/writer double-buffering pipeline\n\
 \n\
 Sending a USR1 signal to a running 'dd' process makes it\n\
 print I/O statistics to standard error and then resume copying.\n\

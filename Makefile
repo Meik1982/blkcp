@@ -1,7 +1,7 @@
 CC ?= gcc
-CFLAGS ?= -O2 -g -Wall -Wextra -Iinclude -Isrc -MMD -MP
+CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
 LDFLAGS ?= 
-LIBS ?= lib/libcoreutils.a -lcrypto
+LIBS ?= lib/libcoreutils.a -lcrypto -lpthread
 
 TARGET = dd
 SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c src/io_engine.c

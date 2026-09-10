@@ -113,4 +113,14 @@ OUT_SHA=$(sha256sum "$TMP_DIR/rand_hash_out.bin" | awk '{print $1}')
 [[ "$EXPECTED_SHA" == "$OUT_SHA" ]]
 echo "Test 16 passed: conv=sha256 on-the-fly streaming checksum verification"
 
-echo "=== All 16 extended tests passed successfully! ==="
+# Test 17: Multi-Threaded Async Double-Buffering Pipeline (opt=async)
+head -c 8388608 /dev/urandom > "$TMP_DIR/rand_async.bin"
+EXPECTED_ASYNC_SHA=$(sha256sum "$TMP_DIR/rand_async.bin" | awk '{print $1}')
+DD_ASYNC_OUTPUT=$($DD_BIN if="$TMP_DIR/rand_async.bin" of="$TMP_DIR/rand_async_out.bin" bs=64k opt=async,hash status=none 2>&1)
+PARSED_ASYNC_SHA=$(echo "$DD_ASYNC_OUTPUT" | grep "^sha256:" | awk '{print $2}')
+[[ "$EXPECTED_ASYNC_SHA" == "$PARSED_ASYNC_SHA" ]]
+OUT_ASYNC_SHA=$(sha256sum "$TMP_DIR/rand_async_out.bin" | awk '{print $1}')
+[[ "$EXPECTED_ASYNC_SHA" == "$OUT_ASYNC_SHA" ]]
+echo "Test 17 passed: Multi-threaded async double-buffering pipeline bit-exactness"
+
+echo "=== All 17 extended tests passed successfully! ==="

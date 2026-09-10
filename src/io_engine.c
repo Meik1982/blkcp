@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "system.h"
 #include "alignalloc.h"
@@ -677,6 +678,257 @@ autotune_sample_tick (dd_context_t *ctx, autotune_state_t *at)
     }
 }
 
+#define ASYNC_QUEUE_CAPACITY 8
+
+typedef struct async_slot
+{
+  char *buf;
+  idx_t nread;
+  bool is_eof;
+  int err;
+} async_slot_t;
+
+typedef struct async_pipeline
+{
+  dd_context_t *ctx;
+  async_slot_t slots[ASYNC_QUEUE_CAPACITY];
+  size_t head;
+  size_t tail;
+  size_t count;
+  bool reader_done;
+  bool stop_requested;
+  int reader_exit;
+  intmax_t r_records_limit;
+  idx_t r_bytes_limit;
+
+  pthread_mutex_t mutex;
+  pthread_cond_t cond_not_full;
+  pthread_cond_t cond_not_empty;
+  pthread_t reader_tid;
+} async_pipeline_t;
+
+static void *
+async_reader_worker (void *arg)
+{
+  async_pipeline_t *pipe = (async_pipeline_t *) arg;
+  dd_context_t *ctx = pipe->ctx;
+
+  sigset_t set;
+  sigfillset (&set);
+  pthread_sigmask (SIG_SETMASK, &set, NULL);
+
+  intmax_t records_read = 0;
+
+  while (true)
+    {
+      if (pipe->r_records_limit != INTMAX_MAX)
+        {
+          if (records_read >= pipe->r_records_limit + !!pipe->r_bytes_limit)
+            break;
+        }
+
+      pthread_mutex_lock (&pipe->mutex);
+      while (pipe->count == ASYNC_QUEUE_CAPACITY && !pipe->stop_requested)
+        pthread_cond_wait (&pipe->cond_not_full, &pipe->mutex);
+
+      if (pipe->stop_requested)
+        {
+          pthread_mutex_unlock (&pipe->mutex);
+          break;
+        }
+
+      size_t slot_idx = pipe->tail;
+      async_slot_t *slot = &pipe->slots[slot_idx];
+      pthread_mutex_unlock (&pipe->mutex);
+
+      idx_t to_read = ctx->cfg.input_blocksize;
+      if (pipe->r_records_limit != INTMAX_MAX && records_read >= pipe->r_records_limit)
+        to_read = pipe->r_bytes_limit;
+
+      ssize_t nread = (ctx->iread_fnc ? ctx->iread_fnc : iread) (STDIN_FILENO, slot->buf, to_read);
+
+      if (nread < 0)
+        {
+          slot->err = errno;
+          slot->nread = 0;
+          slot->is_eof = true;
+          pipe->reader_exit = EXIT_FAILURE;
+
+          pthread_mutex_lock (&pipe->mutex);
+          pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+          pipe->count++;
+          pthread_cond_signal (&pipe->cond_not_empty);
+          pthread_mutex_unlock (&pipe->mutex);
+          break;
+        }
+
+      if (nread == 0)
+        {
+          slot->err = 0;
+          slot->nread = 0;
+          slot->is_eof = true;
+
+          pthread_mutex_lock (&pipe->mutex);
+          pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+          pipe->count++;
+          pthread_cond_signal (&pipe->cond_not_empty);
+          pthread_mutex_unlock (&pipe->mutex);
+          break;
+        }
+
+      slot->err = 0;
+      slot->nread = nread;
+      slot->is_eof = false;
+      records_read++;
+
+      advance_input_offset (ctx, nread);
+      if (ctx->cfg.i_nocache)
+        invalidate_cache (STDIN_FILENO, nread);
+
+      pthread_mutex_lock (&pipe->mutex);
+      pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+      pipe->count++;
+      pthread_cond_signal (&pipe->cond_not_empty);
+      pthread_mutex_unlock (&pipe->mutex);
+    }
+
+  pthread_mutex_lock (&pipe->mutex);
+  pipe->reader_done = true;
+  pthread_cond_signal (&pipe->cond_not_empty);
+  pthread_mutex_unlock (&pipe->mutex);
+
+  return NULL;
+}
+
+static int
+dd_copy_async (dd_context_t *ctx)
+{
+  int exit_status = EXIT_SUCCESS;
+
+  if (ctx->cfg.conversions_mask & C_SHA256)
+    sha256_init_ctx (&ctx->sha_ctx);
+
+  async_pipeline_t pipe;
+  memset (&pipe, 0, sizeof pipe);
+  pipe.ctx = ctx;
+  pipe.r_records_limit = ctx->cfg.max_records;
+  pipe.r_bytes_limit = ctx->cfg.max_bytes;
+
+  pthread_mutex_init (&pipe.mutex, NULL);
+  pthread_cond_init (&pipe.cond_not_full, NULL);
+  pthread_cond_init (&pipe.cond_not_empty, NULL);
+
+  for (size_t i = 0; i < ASYNC_QUEUE_CAPACITY; i++)
+    {
+      pipe.slots[i].buf = alignalloc (ctx->page_size, ctx->cfg.input_blocksize);
+      if (!pipe.slots[i].buf)
+        xalloc_die ();
+    }
+
+  alloc_obuf (ctx);
+
+  if (pthread_create (&pipe.reader_tid, NULL, async_reader_worker, &pipe) != 0)
+    {
+      error (0, errno, _("failed to create async reader thread"));
+      return EXIT_FAILURE;
+    }
+
+  while (true)
+    {
+      if (active_ctx)
+        dd_check_signals (active_ctx);
+
+      pthread_mutex_lock (&pipe.mutex);
+      while (pipe.count == 0 && !pipe.reader_done)
+        pthread_cond_wait (&pipe.cond_not_empty, &pipe.mutex);
+
+      if (pipe.count == 0 && pipe.reader_done)
+        {
+          pthread_mutex_unlock (&pipe.mutex);
+          break;
+        }
+
+      size_t slot_idx = pipe.head;
+      async_slot_t *slot = &pipe.slots[slot_idx];
+      pthread_mutex_unlock (&pipe.mutex);
+
+      if (slot->is_eof)
+        {
+          if (slot->err != 0)
+            {
+              diagnose (slot->err, _("error reading %s"), quoteaf (ctx->cfg.input_file));
+              exit_status = EXIT_FAILURE;
+            }
+          break;
+        }
+
+      if (slot->nread == ctx->cfg.input_blocksize)
+        ctx->stats.r_full++;
+      else
+        ctx->stats.r_partial++;
+
+      if (ctx->translation_needed)
+        {
+          if (ctx->trans_mode == TRANS_MODE_FAST_UCASE)
+            dd_vector_ucase (slot->buf, slot->nread);
+          else if (ctx->trans_mode == TRANS_MODE_FAST_LCASE)
+            dd_vector_lcase (slot->buf, slot->nread);
+          else
+            dd_translate_buffer (ctx->trans_table, slot->buf, slot->nread);
+        }
+
+      if (ctx->translation_needed)
+        copy_simple (ctx, slot->buf, slot->nread);
+      else
+        {
+          idx_t nwritten = iwrite (ctx, STDOUT_FILENO, slot->buf, slot->nread);
+          ctx->stats.w_bytes += nwritten;
+          if (nwritten != slot->nread)
+            {
+              diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+              if (nwritten != 0)
+                ctx->stats.w_partial++;
+              exit_status = EXIT_FAILURE;
+              break;
+            }
+          ctx->stats.w_full++;
+        }
+
+      pthread_mutex_lock (&pipe.mutex);
+      pipe.head = (pipe.head + 1) % ASYNC_QUEUE_CAPACITY;
+      pipe.count--;
+      pthread_cond_signal (&pipe.cond_not_full);
+      pthread_mutex_unlock (&pipe.mutex);
+    }
+
+  pthread_mutex_lock (&pipe.mutex);
+  pipe.stop_requested = true;
+  pthread_cond_signal (&pipe.cond_not_full);
+  pthread_mutex_unlock (&pipe.mutex);
+
+  pthread_join (pipe.reader_tid, NULL);
+  if (pipe.reader_exit != EXIT_SUCCESS)
+    exit_status = pipe.reader_exit;
+
+  if (ctx->oc > 0)
+    write_output (ctx);
+
+  if (ctx->cfg.conversions_mask & C_SHA256)
+    {
+      sha256_finish_ctx (&ctx->sha_ctx, ctx->sha_digest);
+      ctx->sha_computed = true;
+    }
+
+  for (size_t i = 0; i < ASYNC_QUEUE_CAPACITY; i++)
+    alignfree (pipe.slots[i].buf);
+
+  pthread_mutex_destroy (&pipe.mutex);
+  pthread_cond_destroy (&pipe.cond_not_full);
+  pthread_cond_destroy (&pipe.cond_not_empty);
+
+  return exit_status;
+}
+
 static int
 dd_copy (dd_context_t *ctx)
 {
@@ -732,6 +984,9 @@ dd_copy (dd_context_t *ctx)
 
   if (ctx->cfg.max_records == 0 && ctx->cfg.max_bytes == 0)
     return exit_status;
+
+  if ((ctx->cfg.conversions_mask & C_ASYNC) || (ctx->cfg.output_flags & O_ASYNC_PIPELINE))
+    return dd_copy_async (ctx);
 
   alloc_ibuf (ctx);
   alloc_obuf (ctx);

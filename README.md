@@ -100,6 +100,13 @@ $ ./dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
 sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
+### Multi-Threaded Async Double-Buffering Pipeline (`opt=async` / `conv=async` / `oflag=async`)
+Entkoppelt den Lesestrom (`reader_thread`) vom Schreibstrom (`writer_thread`) über einen speichereffizienten POSIX-Ringpuffer (8 Slots). Verhindert, dass langsame Ausgabemedien (z. B. USB-Sticks mit hohen Schreiblatenzen) den Lesevorgang blockieren:
+```bash
+# Schneller NVMe-zu-USB Transfer mit asynchroner Pufferung und Streaming-Hash:
+$ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
+```
+
 ---
 
 ## 5. Bauen, Testen & Benchmarking
@@ -109,7 +116,7 @@ sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 # Release-Build kompilieren
 make clean all
 
-# Alle 16 Regressionstests ausführen
+# Alle 17 Regressionstests ausführen
 make test
 
 # Vergleichs-Benchmark gegen GNU dd ausführen
@@ -126,11 +133,11 @@ Die vollständige Spezifikation aller Schalter, Flags, Conversions und Sicherhei
 man -l man/dd.1
 ```
 
-### Regressionstest-Suite (16 Tests)
+### Regressionstest-Suite (17 Tests)
 ```bash
 ./tests/run_tests.sh
 ```
-Prüft Pipelines, Blockgrößen, Skips, Seeks, EBCDIC/ASCII, Case-Folding, Swab, Sparse-Dateien, `conv=sync`, `conv=block/unblock`, `iflag=count_bytes`, Stille (`status=none`), Bit-Exaktheit von `conv=autotune`/`bs=auto`, den Target Safety Guard sowie On-the-Fly SHA-256 Checksums.
+Prüft Pipelines, Blockgrößen, Skips, Seeks, EBCDIC/ASCII, Case-Folding, Swab, Sparse-Dateien, `conv=sync`, `conv=block/unblock`, `iflag=count_bytes`, Stille (`status=none`), Bit-Exaktheit von `conv=autotune`/`bs=auto`, den Target Safety Guard, On-the-Fly SHA-256 Checksums sowie die Multi-Threaded Async Double-Buffering Pipeline.
 
 ### Vergleichs-Benchmark (Lokal vs. System `/usr/bin/dd`)
 ```bash

@@ -50,6 +50,7 @@ static struct symbol_value const conversions[] =
   {"force", C_FORCE},
   {"sha256", C_SHA256},
   {"hash", C_SHA256},
+  {"async", C_ASYNC},
   {"", 0}
 };
 
@@ -73,6 +74,7 @@ static struct symbol_value const flags[] =
   {"skip_bytes", O_SKIP_BYTES},
   {"seek_bytes", O_SEEK_BYTES},
   {"force", O_FORCE},
+  {"async", O_ASYNC_PIPELINE},
   {"", 0}
 };
 
@@ -329,17 +331,26 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
                                           N_("invalid status level"));
       else if (operand_is (name, "opt"))
         {
-          if (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0))
-            cfg->conversions_mask |= C_AUTOTUNE;
-          else if (operand_matches (val, "force", 0))
-            cfg->output_flags |= O_FORCE;
-          else if (operand_matches (val, "sha256", 0) || operand_matches (val, "hash", 0))
-            cfg->conversions_mask |= C_SHA256;
-          else
+          char *opts = xstrdup (val);
+          char *saveptr = NULL;
+          for (char *tok = strtok_r (opts, ",", &saveptr); tok; tok = strtok_r (NULL, ",", &saveptr))
             {
-              error (0, 0, _("unrecognized operand %s"), quoteaf (name));
-              usage (EXIT_FAILURE);
+              if (operand_matches (tok, "auto", 0) || operand_matches (tok, "autotune", 0))
+                cfg->conversions_mask |= C_AUTOTUNE;
+              else if (operand_matches (tok, "force", 0))
+                cfg->output_flags |= O_FORCE;
+              else if (operand_matches (tok, "sha256", 0) || operand_matches (tok, "hash", 0))
+                cfg->conversions_mask |= C_SHA256;
+              else if (operand_matches (tok, "async", 0) || operand_matches (tok, "pipeline", 0))
+                cfg->conversions_mask |= C_ASYNC;
+              else
+                {
+                  error (0, 0, _("unrecognized option in opt: %s"), quoteaf (tok));
+                  free (opts);
+                  usage (EXIT_FAILURE);
+                }
             }
+          free (opts);
         }
       else if (operand_is (name, "bs") && (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0)))
         {

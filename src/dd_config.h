@@ -47,7 +47,8 @@ enum dd_conversions
   C_SPARSE = 0200000,
   C_AUTOTUNE = 0400000,
   C_FORCE = 01000000,
-  C_SHA256 = 02000000
+  C_SHA256 = 02000000,
+  C_ASYNC = 04000000
 };
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))
@@ -90,7 +91,10 @@ enum dd_private_flags
     O_SEEK_BYTES = FFS_MASK (v5_mask),
     v6_mask = v5_mask ^ O_SEEK_BYTES,
 
-    O_FORCE = FFS_MASK (v6_mask)
+    O_FORCE = FFS_MASK (v6_mask),
+    v7_mask = v6_mask ^ O_FORCE,
+
+    O_ASYNC_PIPELINE = FFS_MASK (v7_mask)
   };
 
 /**

@@ -11,9 +11,8 @@ Dieses Dokument erfasst alle im abschließenden Code-Check identifizierten Optim
 - [ ] **`copy_file_range(2)` & Reflink-Support:**
   - *Beschreibung:* Automatische Nutzung von In-Kernel Zero-Copy und Copy-on-Write-Klonen (Btrfs, XFS), wenn Source und Target reguläre Dateien sind und keine blockverändernden Konvertierungen anliegen.
   - *Nutzen:* Nahezu instantanes Duplizieren großer Images ohne physische Disk-Schreiblast.
-- [ ] **Multi-Threaded Double-Buffering (Async Pipeline):**
-  - *Beschreibung:* Aufteilung von `read()` und `write()` in getrennte Threads mit Ringpuffer (Producer-Consumer-Pattern).
-  - *Nutzen:* Volle I/O-Überlappung; Lesevorgänge warten nicht mehr auf synchrone Schreibbestätigungen langsamer Zielmedien.
+- [x] **Multi-Threaded Double-Buffering (Async Pipeline):**
+  - *Status:* Erledigt. Multi-Threaded Double-Buffering Pipeline mit Ringpuffer (`ASYNC_QUEUE_CAPACITY = 8`) via POSIX-Threads (`pthread`) implementiert (`opt=async` / `conv=async` / `oflag=async`). Entkoppelt Reader und Writer vollständig, blockiert Signale im Worker-Thread zur Vermeidung von Handler-Kollisionen und unterstützt Streaming-SHA-256 transparent. In Regressionstest 17 verifiziert.
 
 ---
 

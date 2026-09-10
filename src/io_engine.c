@@ -406,6 +406,8 @@ iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
       if (0 <= offset)
         {
           ctx->final_op_was_seek = true;
+          if (ctx->cfg.conversions_mask & C_SHA256)
+            sha256_process_bytes (buf, size, &ctx->sha_ctx);
           return size;
         }
     }
@@ -427,6 +429,9 @@ iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
       else
         total_written += nwritten;
     }
+
+  if (total_written > 0 && (ctx->cfg.conversions_mask & C_SHA256))
+    sha256_process_bytes (buf, total_written, &ctx->sha_ctx);
 
   if (ctx->cfg.o_nocache && total_written)
     invalidate_cache (fd, total_written);
@@ -731,6 +736,9 @@ dd_copy (dd_context_t *ctx)
   alloc_ibuf (ctx);
   alloc_obuf (ctx);
 
+  if (ctx->cfg.conversions_mask & C_SHA256)
+    sha256_init_ctx (&ctx->sha_ctx);
+
   autotune_state_t at;
   memset (&at, 0, sizeof at);
   at.active = !!(ctx->cfg.conversions_mask & C_AUTOTUNE);
@@ -916,6 +924,12 @@ dd_copy (dd_context_t *ctx)
         ctx->stats.w_partial++;
     }
 
+  if (ctx->cfg.conversions_mask & C_SHA256)
+    {
+      sha256_finish_ctx (&ctx->sha_ctx, ctx->sha_digest);
+      ctx->sha_computed = true;
+    }
+
   return exit_status;
 }
 
@@ -1053,6 +1067,8 @@ dd_execute (dd_context_t *ctx)
 
   dd_engine_cleanup (ctx);
   dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+  if (ctx->sha_computed)
+    dd_print_hash (ctx->sha_digest);
 
   return exit_status;
 }

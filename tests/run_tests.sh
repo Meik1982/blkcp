@@ -102,4 +102,15 @@ else
   echo "Test 15 skipped: Root device not a block device in current environment"
 fi
 
-echo "=== All 15 extended tests passed successfully! ==="
+# Test 16: On-the-fly streaming SHA-256 computation (conv=sha256)
+head -c 4194304 /dev/urandom > "$TMP_DIR/rand_hash.bin"
+EXPECTED_SHA=$(sha256sum "$TMP_DIR/rand_hash.bin" | awk '{print $1}')
+DD_SHA_OUTPUT=$($DD_BIN if="$TMP_DIR/rand_hash.bin" of="$TMP_DIR/rand_hash_out.bin" conv=sha256 status=none 2>&1)
+PARSED_SHA=$(echo "$DD_SHA_OUTPUT" | grep "^sha256:" | awk '{print $2}')
+[[ "$EXPECTED_SHA" == "$PARSED_SHA" ]]
+# Verify content exactness as well
+OUT_SHA=$(sha256sum "$TMP_DIR/rand_hash_out.bin" | awk '{print $1}')
+[[ "$EXPECTED_SHA" == "$OUT_SHA" ]]
+echo "Test 16 passed: conv=sha256 on-the-fly streaming checksum verification"
+
+echo "=== All 16 extended tests passed successfully! ==="

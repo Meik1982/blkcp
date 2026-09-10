@@ -15,6 +15,9 @@ void dd_print_xfer_stats (const dd_stats_t *stats, int *progress_len, xtime_t pr
 /* Print overall summary statistics (records in/out, truncated, transfer stats) */
 void dd_print_stats (const dd_stats_t *stats, int status_level, int *progress_len);
 
+/* Print SHA-256 streaming hash digest */
+void dd_print_hash (const unsigned char *digest);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,6 +1,7 @@
 #ifndef DD_CONFIG_H
 #define DD_CONFIG_H
 
+#include <config.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -9,6 +10,7 @@
 #include "system.h"
 #include "idx.h"
 #include "xtime.h"
+#include "sha256.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,7 +46,8 @@ enum dd_conversions
   C_FSYNC = 0100000,
   C_SPARSE = 0200000,
   C_AUTOTUNE = 0400000,
-  C_FORCE = 01000000
+  C_FORCE = 01000000,
+  C_SHA256 = 02000000
 };
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))
@@ -169,6 +172,11 @@ typedef struct dd_context
 
   /* Dynamic function pointers */
   ssize_t (*iread_fnc) (int fd, char *buf, idx_t size);
+
+  /* On-the-fly checksumming state */
+  struct sha256_ctx sha_ctx;
+  unsigned char sha_digest[32];
+  bool sha_computed;
 } dd_context_t;
 
 /* Global or thread-local active context pointer for signal handling */

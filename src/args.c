@@ -48,6 +48,8 @@ static struct symbol_value const conversions[] =
   {"fdatasync", C_FDATASYNC},
   {"fsync", C_FSYNC},
   {"force", C_FORCE},
+  {"sha256", C_SHA256},
+  {"hash", C_SHA256},
   {"", 0}
 };
 
@@ -331,6 +333,8 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
             cfg->conversions_mask |= C_AUTOTUNE;
           else if (operand_matches (val, "force", 0))
             cfg->output_flags |= O_FORCE;
+          else if (operand_matches (val, "sha256", 0) || operand_matches (val, "hash", 0))
+            cfg->conversions_mask |= C_SHA256;
           else
             {
               error (0, 0, _("unrecognized operand %s"), quoteaf (name));

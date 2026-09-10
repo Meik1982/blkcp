@@ -46,6 +46,5 @@ Dieses Dokument erfasst alle im abschließenden Code-Check identifizierten Optim
 ## 5. Ergonomie, Datenintegrität & Safety-Guards
 - [x] **Target Safety-Guard (Root / Mounted Partition Check):**
   - *Status:* Erledigt. `check_target_safety()` prüft via `/proc/mounts` und Major-/Device-IDs, ob `of=` das aktive `/`, `/boot`, `/boot/efi` oder `/home`-Dateisystem oder dessen übergeordnete Disk adressiert. Bricht mit klarer Schutzmeldung ab, es sei denn `oflag=force`, `conv=force` oder `opt=force` wurde explizit angegeben. In Regressionstest 15 erfolgreich verifiziert.
-- [ ] **Integrierte On-the-Fly Streaming-Prüfsumme:**
-  - *Beschreibung:* Optionale Berechnung eines SHA-256- oder BLAKE3-Hashes parallel zum Schreiben (`status=hash` oder `conv=sha256`).
-  - *Nutzen:* Sofortige Integritätsverifikation von geschriebenen OS-Images/USB-Sticks ohne zweiten zeitraubenden Lesedurchlauf.
+- [x] **Integrierte On-the-Fly Streaming-Prüfsumme:**
+  - *Status:* Erledigt. `conv=sha256` (sowie `opt=sha256` / `conv=hash`) implementiert. Berechnet den kryptografischen SHA-256 Digest on-the-fly parallel zum Schreiben in `iwrite()` ohne zusätzlichen I/O-Pass. Ermöglicht sofortige Integritätsverifikation beim Schreiben von Boot-Images/USB-Sticks. In Regressionstest 16 mit 4-MB-Zufallsdaten verifiziert.

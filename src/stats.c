@@ -109,3 +109,13 @@ dd_print_stats (const dd_stats_t *stats, int status_level, int *progress_len)
 
   dd_print_xfer_stats (stats, progress_len, 0);
 }
+
+void
+dd_print_hash (const unsigned char *digest)
+{
+  char hex[65];
+  for (int i = 0; i < 32; i++)
+    sprintf (hex + i * 2, "%02x", digest[i]);
+  hex[64] = '\0';
+  fprintf (stderr, "sha256: %s\n", hex);
+}

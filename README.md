@@ -89,6 +89,17 @@ Use 'oflag=force' or 'opt=force' to override if intentional.
 $ ./dd if=image.raw of=/dev/nvme0n1p2 oflag=force
 ```
 
+### On-the-Fly Streaming SHA-256 Checksumme (`conv=sha256` / `opt=hash`)
+Berechnet die kryptografische Prüfsumme direkt parallel zum Schreiben. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs beim Schreiben von Boot-Images oder Backups:
+```bash
+# ISO auf Stick schreiben mit sofortiger Prüfsummen-Verifikation:
+$ ./dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
+4027+0 records in
+4027+0 records out
+1073741824 bytes (1,1 GB, 1,0 GiB) copied, 0,048 s, 22,3 GB/s
+sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+```
+
 ---
 
 ## 5. Bauen, Testen & Benchmarking
@@ -100,11 +111,11 @@ make clean all
 ```
 *Das Makefile unterstützt automatische Header-Dependency-Verfolgung (`-MMD -MP`).*
 
-### Regressionstest-Suite (15 Tests)
+### Regressionstest-Suite (16 Tests)
 ```bash
 ./tests/run_tests.sh
 ```
-Prüft Pipelines, Blockgrößen, Skips, Seeks, EBCDIC/ASCII, Case-Folding, Swab, Sparse-Dateien, `conv=sync`, `conv=block/unblock`, `iflag=count_bytes`, Stille (`status=none`), Bit-Exaktheit von `conv=autotune`/`bs=auto` sowie den Target Safety Guard.
+Prüft Pipelines, Blockgrößen, Skips, Seeks, EBCDIC/ASCII, Case-Folding, Swab, Sparse-Dateien, `conv=sync`, `conv=block/unblock`, `iflag=count_bytes`, Stille (`status=none`), Bit-Exaktheit von `conv=autotune`/`bs=auto`, den Target Safety Guard sowie On-the-Fly SHA-256 Checksums.
 
 ### Vergleichs-Benchmark (Lokal vs. System `/usr/bin/dd`)
 ```bash

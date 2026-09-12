@@ -111,6 +111,7 @@ $ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
 Komfortabler, maus- und tastaturgesteuerter Terminal-Assistent auf Basis von `ncursesw`:
 * **Block-Device Erkennung:** Erkennt USB-Sticks und Festplatten automatisch via `/sys/block`, zeigt Gerätemodelle und Größen an und markiert System-Laufwerke (`/`, `/boot`, `/home`) mit Schutzsperren.
 * **Integrierter Dateibrowser:** Komfortables Auswählen von `.iso`-, `.img`- und `.raw`-Dateien sowie Anlegen neuer Zieldateien direkt im aktiven Ordner mit der Taste `[N]`.
+* **Programm- & Pipe-Integration:** Volle Unterstützung von Unix-Pipes (`[Pipe]`-Button). Unterstützt direkte Stream-Ein-/Ausgabe (`stdin`/`stdout`), Dekompression/Kompression (`zstd`, `gzip`, `xz`), Remote-Transfers (`ssh`) und Web-Streams (`curl`).
 * **Befehlsgenerator & Clipboard:** Erzeugt die exakte CLI-Kommandozeile in Echtzeit und kopiert sie auf Knopfdruck in die X11-/Wayland-Zwischenablage.
 * **Sicherheits-Popup:** Erzwingt eine bewusste Bestätigung vor Schreibzugriffen auf physische Datenträger.
 ```bash

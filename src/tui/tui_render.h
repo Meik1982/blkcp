@@ -17,9 +17,11 @@ typedef enum tui_field_id {
     FIELD_IF = 0,
     FIELD_IF_SEARCH_FILE,
     FIELD_IF_SEARCH_DEV,
+    FIELD_IF_SEARCH_PIPE,
     FIELD_OF,
     FIELD_OF_SEARCH_FILE,
     FIELD_OF_SEARCH_DEV,
+    FIELD_OF_SEARCH_PIPE,
     FIELD_BS,
     FIELD_COUNT,
     FIELD_COUNT_BYTES,
@@ -46,7 +48,9 @@ typedef enum tui_field_id {
  */
 typedef struct tui_form {
     char if_path[512];
+    bool if_is_pipe;
     char of_path[512];
+    bool of_is_pipe;
     char bs[64];
     char count[64];
     bool count_bytes;

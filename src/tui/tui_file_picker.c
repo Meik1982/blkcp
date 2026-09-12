@@ -305,3 +305,123 @@ tui_pick_file(char const *start_path, char *out_selected, size_t out_len)
     delwin(win);
     return res;
 }
+
+int
+tui_pick_pipe(bool is_input, char *out_cmd, size_t out_len)
+{
+    int win_h = 16;
+    int win_w = 74;
+    int start_y = (LINES - win_h) / 2;
+    int start_x = (COLS - win_w) / 2;
+    if (start_y < 0) start_y = 0;
+    if (start_x < 0) start_x = 0;
+
+    WINDOW *win = newwin(win_h, win_w, start_y, start_x);
+    keypad(win, TRUE);
+
+    char const *presets_in[] = {
+        "stdin  (Direkte Unix-Standard-Pipe: command | dd)",
+        "zstd -dc  (Dekomprimieren: zstd -dc <datei.zst>)",
+        "gzip -dc  (Dekomprimieren: gzip -dc <datei.gz>)",
+        "xz -dc    (Dekomprimieren: xz -dc <datei.xz>)",
+        "curl -sL  (Download-Stream: curl -sL <URL>)",
+        "ssh       (Remote: ssh user@host \"cat /dev/sda\")",
+        "Eigenen Befehl / Pipeline eingeben..."
+    };
+
+    char const *presets_out[] = {
+        "stdout  (Direkte Unix-Standard-Pipe: dd | command)",
+        "zstd -c   (Komprimieren: zstd -c > <datei.zst>)",
+        "gzip -c   (Komprimieren: gzip -c > <datei.gz>)",
+        "xz -c     (Komprimieren: xz -c > <datei.xz>)",
+        "ssh       (Remote: ssh user@host \"dd of=/dev/sda\")",
+        "Eigenen Befehl / Pipeline eingeben..."
+    };
+
+    size_t count = is_input ? 7 : 6;
+    char const **presets = is_input ? presets_in : presets_out;
+    size_t selected = 0;
+    int res = -1;
+
+    while (true) {
+        werase(win);
+        box(win, 0, 0);
+        wattron(win, A_BOLD | COLOR_PAIR(4));
+        mvwprintw(win, 0, 2, " [ %s-Pipeline / Programm konfigurieren ] ", is_input ? "Input" : "Output");
+        wattroff(win, A_BOLD | COLOR_PAIR(4));
+
+        mvwprintw(win, 2, 2, "Waehle eine Vorlage oder gib ein eigenes Programm ein:");
+
+        for (size_t i = 0; i < count; i++) {
+            if (i == selected) {
+                wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
+                mvwprintw(win, 4 + i, 2, " > %-68.68s", presets[i]);
+                wattroff(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
+            } else {
+                mvwprintw(win, 4 + i, 2, "   %-68.68s", presets[i]);
+            }
+        }
+
+        mvwprintw(win, win_h - 2, 2, "[Pfeile]: Navigieren | [Enter]: Auswaehlen | [Esc]: Abbrechen");
+        wrefresh(win);
+
+        int ch = wgetch(win);
+        if (ch == 27 || ch == 'q' || ch == 'Q') {
+            res = -1;
+            break;
+        } else if (ch == KEY_UP && selected > 0) {
+            selected--;
+        } else if (ch == KEY_DOWN && selected + 1 < count) {
+            selected++;
+        } else if (ch == 10 || ch == KEY_ENTER) {
+            char default_cmd[256] = "";
+            if (is_input) {
+                if (selected == 0) snprintf(default_cmd, sizeof default_cmd, "stdin");
+                else if (selected == 1) snprintf(default_cmd, sizeof default_cmd, "zstd -dc backup.img.zst");
+                else if (selected == 2) snprintf(default_cmd, sizeof default_cmd, "gzip -dc backup.img.gz");
+                else if (selected == 3) snprintf(default_cmd, sizeof default_cmd, "xz -dc backup.img.xz");
+                else if (selected == 4) snprintf(default_cmd, sizeof default_cmd, "curl -sL https://example.com/image.iso");
+                else if (selected == 5) snprintf(default_cmd, sizeof default_cmd, "ssh user@host \"cat /dev/sda\"");
+            } else {
+                if (selected == 0) snprintf(default_cmd, sizeof default_cmd, "stdout");
+                else if (selected == 1) snprintf(default_cmd, sizeof default_cmd, "zstd -c > backup.img.zst");
+                else if (selected == 2) snprintf(default_cmd, sizeof default_cmd, "gzip -c > backup.img.gz");
+                else if (selected == 3) snprintf(default_cmd, sizeof default_cmd, "xz -c > backup.img.xz");
+                else if (selected == 4) snprintf(default_cmd, sizeof default_cmd, "ssh user@host \"dd of=/dev/sda\"");
+            }
+
+            int edit_h = 7;
+            int edit_w = 68;
+            int edit_y = (LINES - edit_h) / 2;
+            int edit_x = (COLS - edit_w) / 2;
+            WINDOW *ew = newwin(edit_h, edit_w, edit_y, edit_x);
+            keypad(ew, TRUE);
+            echo();
+            curs_set(1);
+            box(ew, 0, 0);
+
+            mvwprintw(ew, 1, 2, "Befehl fuer %s-Pipeline anpassen:", is_input ? "Input (vor dd)" : "Output (nach dd)");
+            mvwprintw(ew, 4, 2, "[Enter]: Bestaetigen | [Leer lassen]: Abbrechen");
+            mvwprintw(ew, 2, 2, "> ");
+            wrefresh(ew);
+
+            char input[256];
+            snprintf(input, sizeof input, "%s", default_cmd);
+            wmove(ew, 2, 4);
+            wgetnstr(ew, input, sizeof(input) - 1);
+
+            noecho();
+            curs_set(0);
+            delwin(ew);
+
+            if (input[0] != '\0') {
+                snprintf(out_cmd, out_len, "%s", input);
+                res = 0;
+            }
+            break;
+        }
+    }
+
+    delwin(win);
+    return res;
+}

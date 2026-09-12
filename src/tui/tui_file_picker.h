@@ -25,4 +25,13 @@ int tui_pick_file(char const *start_path, char *out_selected, size_t out_len);
  */
 int tui_pick_device(char *out_selected, size_t out_len);
 
+/**
+ * @brief Opens an interactive modal to configure an input or output pipeline command / stream
+ * @param is_input true for input pipeline, false for output pipeline
+ * @param out_cmd Output buffer for configured pipe command
+ * @param out_len Maximum buffer length
+ * @return 0 on success, -1 on cancel
+ */
+int tui_pick_pipe(bool is_input, char *out_cmd, size_t out_len);
+
 #endif /* TUI_FILE_PICKER_H */

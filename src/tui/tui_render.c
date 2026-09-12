@@ -29,14 +29,28 @@ tui_init_form(tui_form_t *form)
 void
 tui_build_command(tui_form_t const *form, char *cmd, size_t cmd_len)
 {
+    char prefix[600] = "";
     char buf[1024] = "./dd";
+    char suffix[600] = "";
 
-    if (form->if_path[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " if=\"%s\"", form->if_path);
+    /* Input stream / pipe */
+    if (form->if_is_pipe) {
+        if (form->if_path[0] && strcmp(form->if_path, "stdin") != 0 && strcmp(form->if_path, "-") != 0) {
+            snprintf(prefix, sizeof prefix, "%.500s | ", form->if_path);
+        }
+    } else if (form->if_path[0]) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " if=\"%.500s\"", form->if_path);
     }
-    if (form->of_path[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " of=\"%s\"", form->of_path);
+
+    /* Output stream / pipe */
+    if (form->of_is_pipe) {
+        if (form->of_path[0] && strcmp(form->of_path, "stdout") != 0 && strcmp(form->of_path, "-") != 0) {
+            snprintf(suffix, sizeof suffix, " | %.500s", form->of_path);
+        }
+    } else if (form->of_path[0]) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " of=\"%.500s\"", form->of_path);
     }
+
     if (form->bs[0]) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " bs=%s", form->bs);
     }
@@ -101,7 +115,7 @@ tui_build_command(tui_form_t const *form, char *cmd, size_t cmd_len)
     else if (form->status_mode == 1) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " status=noxfer");
     else if (form->status_mode == 2) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " status=progress");
 
-    snprintf(cmd, cmd_len, "%s", buf);
+    snprintf(cmd, cmd_len, "%s%s%s", prefix, buf, suffix);
 }
 
 static void
@@ -146,13 +160,15 @@ tui_render(WINDOW *win, tui_form_t const *form)
     mvwprintw(win, 2, 2, "[ Ein- und Ausgabe ]");
     wattroff(win, A_BOLD);
 
-    draw_field_str(win, 3, 2, "Input (if):  ", form->if_path, 34, form->active_field == FIELD_IF);
-    draw_button(win, 3, 53, "Datei", form->active_field == FIELD_IF_SEARCH_FILE, 3);
-    draw_button(win, 3, 64, "Disk", form->active_field == FIELD_IF_SEARCH_DEV, 3);
+    draw_field_str(win, 3, 2, "Input (if):  ", form->if_path, 26, form->active_field == FIELD_IF);
+    draw_button(win, 3, 44, "Datei", form->active_field == FIELD_IF_SEARCH_FILE, 3);
+    draw_button(win, 3, 54, "Disk", form->active_field == FIELD_IF_SEARCH_DEV, 3);
+    draw_button(win, 3, 63, "Pipe", form->active_field == FIELD_IF_SEARCH_PIPE, 4);
 
-    draw_field_str(win, 4, 2, "Output (of): ", form->of_path, 34, form->active_field == FIELD_OF);
-    draw_button(win, 4, 53, "Datei", form->active_field == FIELD_OF_SEARCH_FILE, 3);
-    draw_button(win, 4, 64, "Disk", form->active_field == FIELD_OF_SEARCH_DEV, 3);
+    draw_field_str(win, 4, 2, "Output (of): ", form->of_path, 26, form->active_field == FIELD_OF);
+    draw_button(win, 4, 44, "Datei", form->active_field == FIELD_OF_SEARCH_FILE, 3);
+    draw_button(win, 4, 54, "Disk", form->active_field == FIELD_OF_SEARCH_DEV, 3);
+    draw_button(win, 4, 63, "Pipe", form->active_field == FIELD_OF_SEARCH_PIPE, 4);
 
     /* Section 2: Block-Konfiguration */
     wattron(win, A_BOLD);

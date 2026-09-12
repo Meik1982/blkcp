@@ -173,6 +173,16 @@ Flash a Linux OS image to a USB stick with dynamic throughput autotuning and imm
 .B dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
 .RE
 .PP
+Decompress and write an OS image on-the-fly via standard Unix pipeline:
+.RS
+.B zstd -dc archlinux.iso.zst | dd of=/dev/sdb bs=auto opt=async,hash status=progress
+.RE
+.PP
+Stream raw disk backup to remote storage over SSH with multi-threaded double-buffering:
+.RS
+.B dd if=/dev/nvme0n1 bs=auto opt=async,hash | ssh root@nas "cat > /backup/system.raw"
+.RE
+.PP
 Copy random test stream with 1 GB limit and exact byte counting:
 .RS
 .B dd if=/dev/urandom of=test.bin count=1G iflag=count_bytes bs=auto

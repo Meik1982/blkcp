@@ -303,18 +303,30 @@ main(void)
 
         case 10:
         case KEY_ENTER:
-            if (form.active_field == FIELD_IF)
-                edit_text_modal("Input-Pfad (if=) eingeben:", form.if_path, sizeof form.if_path);
-            else if (form.active_field == FIELD_IF_SEARCH_FILE) {
-                tui_pick_file(form.if_path[0] ? form.if_path : NULL, form.if_path, sizeof form.if_path);
+            if (form.active_field == FIELD_IF) {
+                edit_text_modal("Input-Pfad (if=) oder Pipe eingeben:", form.if_path, sizeof form.if_path);
+                if (form.if_path[0] == '|') form.if_is_pipe = true;
+            } else if (form.active_field == FIELD_IF_SEARCH_FILE) {
+                if (tui_pick_file(form.if_path[0] ? form.if_path : NULL, form.if_path, sizeof form.if_path) == 0)
+                    form.if_is_pipe = false;
             } else if (form.active_field == FIELD_IF_SEARCH_DEV) {
-                tui_pick_device(form.if_path, sizeof form.if_path);
-            } else if (form.active_field == FIELD_OF)
-                edit_text_modal("Output-Pfad (of=) eingeben:", form.of_path, sizeof form.of_path);
-            else if (form.active_field == FIELD_OF_SEARCH_FILE) {
-                tui_pick_file(form.of_path[0] ? form.of_path : NULL, form.of_path, sizeof form.of_path);
+                if (tui_pick_device(form.if_path, sizeof form.if_path) == 0)
+                    form.if_is_pipe = false;
+            } else if (form.active_field == FIELD_IF_SEARCH_PIPE) {
+                if (tui_pick_pipe(true, form.if_path, sizeof form.if_path) == 0)
+                    form.if_is_pipe = true;
+            } else if (form.active_field == FIELD_OF) {
+                edit_text_modal("Output-Pfad (of=) oder Pipe eingeben:", form.of_path, sizeof form.of_path);
+                if (form.of_path[0] == '|') form.of_is_pipe = true;
+            } else if (form.active_field == FIELD_OF_SEARCH_FILE) {
+                if (tui_pick_file(form.of_path[0] ? form.of_path : NULL, form.of_path, sizeof form.of_path) == 0)
+                    form.of_is_pipe = false;
             } else if (form.active_field == FIELD_OF_SEARCH_DEV) {
-                tui_pick_device(form.of_path, sizeof form.of_path);
+                if (tui_pick_device(form.of_path, sizeof form.of_path) == 0)
+                    form.of_is_pipe = false;
+            } else if (form.active_field == FIELD_OF_SEARCH_PIPE) {
+                if (tui_pick_pipe(false, form.of_path, sizeof form.of_path) == 0)
+                    form.of_is_pipe = true;
             } else if (form.active_field == FIELD_BS)
                 edit_text_modal("Block Size (bs=, z.B. auto, 1M, 64k):", form.bs, sizeof form.bs);
             else if (form.active_field == FIELD_COUNT)

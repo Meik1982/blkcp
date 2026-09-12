@@ -12,11 +12,13 @@ tui_nav_right(tui_field_id_t cur)
     switch (cur) {
     case FIELD_IF:              return FIELD_IF_SEARCH_FILE;
     case FIELD_IF_SEARCH_FILE:  return FIELD_IF_SEARCH_DEV;
-    case FIELD_IF_SEARCH_DEV:   return FIELD_IF;
+    case FIELD_IF_SEARCH_DEV:   return FIELD_IF_SEARCH_PIPE;
+    case FIELD_IF_SEARCH_PIPE:  return FIELD_IF;
 
     case FIELD_OF:              return FIELD_OF_SEARCH_FILE;
     case FIELD_OF_SEARCH_FILE:  return FIELD_OF_SEARCH_DEV;
-    case FIELD_OF_SEARCH_DEV:   return FIELD_OF;
+    case FIELD_OF_SEARCH_DEV:   return FIELD_OF_SEARCH_PIPE;
+    case FIELD_OF_SEARCH_PIPE:  return FIELD_OF;
 
     case FIELD_BS:              return FIELD_BS;
 
@@ -53,13 +55,15 @@ tui_field_id_t
 tui_nav_left(tui_field_id_t cur)
 {
     switch (cur) {
+    case FIELD_IF_SEARCH_PIPE:  return FIELD_IF_SEARCH_DEV;
     case FIELD_IF_SEARCH_DEV:   return FIELD_IF_SEARCH_FILE;
     case FIELD_IF_SEARCH_FILE:  return FIELD_IF;
-    case FIELD_IF:              return FIELD_IF_SEARCH_DEV;
+    case FIELD_IF:              return FIELD_IF_SEARCH_PIPE;
 
+    case FIELD_OF_SEARCH_PIPE:  return FIELD_OF_SEARCH_DEV;
     case FIELD_OF_SEARCH_DEV:   return FIELD_OF_SEARCH_FILE;
     case FIELD_OF_SEARCH_FILE:  return FIELD_OF;
-    case FIELD_OF:              return FIELD_OF_SEARCH_DEV;
+    case FIELD_OF:              return FIELD_OF_SEARCH_PIPE;
 
     case FIELD_BS:              return FIELD_BS;
 
@@ -99,10 +103,12 @@ tui_nav_down(tui_field_id_t cur)
     case FIELD_IF:              return FIELD_OF;
     case FIELD_IF_SEARCH_FILE:  return FIELD_OF_SEARCH_FILE;
     case FIELD_IF_SEARCH_DEV:   return FIELD_OF_SEARCH_DEV;
+    case FIELD_IF_SEARCH_PIPE:  return FIELD_OF_SEARCH_PIPE;
 
     case FIELD_OF:
     case FIELD_OF_SEARCH_FILE:
-    case FIELD_OF_SEARCH_DEV:   return FIELD_BS;
+    case FIELD_OF_SEARCH_DEV:
+    case FIELD_OF_SEARCH_PIPE:  return FIELD_BS;
 
     case FIELD_BS:              return FIELD_COUNT;
 
@@ -141,11 +147,13 @@ tui_nav_up(tui_field_id_t cur)
     switch (cur) {
     case FIELD_IF:              return FIELD_BTN_START;
     case FIELD_IF_SEARCH_FILE:  return FIELD_BTN_COPY;
-    case FIELD_IF_SEARCH_DEV:   return FIELD_BTN_QUIT;
+    case FIELD_IF_SEARCH_DEV:
+    case FIELD_IF_SEARCH_PIPE:  return FIELD_BTN_QUIT;
 
     case FIELD_OF:              return FIELD_IF;
     case FIELD_OF_SEARCH_FILE:  return FIELD_IF_SEARCH_FILE;
     case FIELD_OF_SEARCH_DEV:   return FIELD_IF_SEARCH_DEV;
+    case FIELD_OF_SEARCH_PIPE:  return FIELD_IF_SEARCH_PIPE;
 
     case FIELD_BS:              return FIELD_OF;
 

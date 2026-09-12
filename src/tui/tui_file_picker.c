@@ -36,6 +36,48 @@ compare_entries(const void *a, const void *b)
     return strcmp(fa->name, fb->name);
 }
 
+static bool
+prompt_new_file(char const *dir, char *out_selected, size_t out_len)
+{
+    int win_h = 8;
+    int win_w = 64;
+    int start_y = (LINES - win_h) / 2;
+    int start_x = (COLS - win_w) / 2;
+
+    WINDOW *w = newwin(win_h, win_w, start_y, start_x);
+    keypad(w, TRUE);
+    echo();
+    curs_set(1);
+
+    box(w, 0, 0);
+    wattron(w, A_BOLD | COLOR_PAIR(2));
+    mvwprintw(w, 1, 2, "[ Neue Datei in aktuellem Ordner anlegen ]");
+    wattroff(w, A_BOLD | COLOR_PAIR(2));
+    mvwprintw(w, 2, 2, "Pfad: %.50s", dir);
+    mvwprintw(w, 4, 2, "Dateiname (z.B. backup.img):");
+    mvwprintw(w, 5, 2, "> ");
+    mvwprintw(w, 6, 2, "[Enter]: Bestaetigen | [Leer lassen]: Abbrechen");
+    wrefresh(w);
+
+    char name[256] = "";
+    wmove(w, 5, 4);
+    wgetnstr(w, name, sizeof(name) - 1);
+
+    noecho();
+    curs_set(0);
+    delwin(w);
+
+    if (name[0] == '\0')
+        return false;
+
+    if (strcmp(dir, "/") == 0)
+        snprintf(out_selected, out_len, "/%.255s", name);
+    else
+        snprintf(out_selected, out_len, "%.500s/%.255s", dir, name);
+
+    return true;
+}
+
 int
 tui_pick_device(char *out_selected, size_t out_len)
 {
@@ -214,13 +256,18 @@ tui_pick_file(char const *start_path, char *out_selected, size_t out_len)
             }
         }
 
-        mvwprintw(win, win_h - 2, 2, "[Enter]: Oeffnen/Waehlen | [Pfeile]: Navigation | [Esc]: Abbrechen");
+        mvwprintw(win, win_h - 2, 2, "[Enter]: Waehlen | [N]: Neue Datei | [Pfeile]: Nav | [Esc]: Zurueck");
         wrefresh(win);
 
         int ch = wgetch(win);
         if (ch == 27 || ch == 'q' || ch == 'Q') {
             res = -1;
             break;
+        } else if (ch == 'n' || ch == 'N') {
+            if (prompt_new_file(cur_dir, out_selected, out_len)) {
+                res = 0;
+                break;
+            }
         } else if (ch == KEY_UP && selected > 0) {
             selected--;
         } else if (ch == KEY_DOWN && selected + 1 < n_entries) {

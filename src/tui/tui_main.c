@@ -248,6 +248,16 @@ main(void)
         int ch = wgetch(win);
 
         switch (ch) {
+        case KEY_RESIZE:
+            start_y = (LINES - win_h) / 2;
+            start_x = (COLS - win_w) / 2;
+            if (start_y < 0) start_y = 0;
+            if (start_x < 0) start_x = 0;
+            erase();
+            refresh();
+            mvwin(win, start_y, start_x);
+            break;
+
         case '\t':
             form.active_field = (form.active_field + 1) % FIELD_COUNT_TOTAL;
             break;

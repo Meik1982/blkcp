@@ -27,11 +27,14 @@ tui_init_form(tui_form_t *form)
 }
 
 void
-tui_build_command(tui_form_t const *form, char *cmd, size_t cmd_len)
+tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t cmd_len)
 {
+    char const *bin = (dd_bin && dd_bin[0]) ? dd_bin : "./dd";
     char prefix[600] = "";
-    char buf[1024] = "./dd";
+    char buf[1024];
     char suffix[600] = "";
+
+    snprintf(buf, sizeof buf, "%s", bin);
 
     /* Input stream / pipe */
     if (form->if_is_pipe) {
@@ -280,7 +283,7 @@ tui_render(WINDOW *win, tui_form_t const *form)
 
     /* Live Command Preview */
     char cmd[1024];
-    tui_build_command(form, cmd, sizeof cmd);
+    tui_build_command(form, "./dd", cmd, sizeof cmd);
     wattron(win, A_DIM);
     mvwprintw(win, 26, 2, "Befehl: %-66.66s", cmd);
     wattroff(win, A_DIM);

@@ -90,8 +90,12 @@ void tui_init_form(tui_form_t *form);
 
 /**
  * @brief Generates the command-line string matching current form settings
+ * @param form Form model
+ * @param dd_bin Binary path to invoke (defaults to "./dd" if NULL)
+ * @param cmd Output buffer
+ * @param cmd_len Buffer size
  */
-void tui_build_command(tui_form_t const *form, char *cmd, size_t cmd_len);
+void tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t cmd_len);
 
 /**
  * @brief Renders the entire TUI form window

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <pthread.h>
 
 #include "system.h"
@@ -66,6 +67,36 @@ detect_optimal_blocksize (int fd)
   return 0;
 }
 
+/* Helper to check if dev_name is a partition of disk_name (e.g. sda1 of sda, nvme0n1p2 of nvme0n1)
+   without matching non-partition prefixes (e.g. sdaa1 of sda) */
+static inline bool
+is_partition_of_device (char const *dev_name, char const *disk_name)
+{
+  size_t dlen = strlen (disk_name);
+  if (dlen == 0 || strncmp (dev_name, disk_name, dlen) != 0)
+    return false;
+
+  char next = dev_name[dlen];
+  if (next == '\0')
+    return true;
+
+  char last_disk_char = disk_name[dlen - 1];
+  if (isdigit ((unsigned char) last_disk_char))
+    {
+      /* Disks ending in digit (nvme0n1, mmcblk0) separate partitions with 'p<digit>' */
+      if (next == 'p' && isdigit ((unsigned char) dev_name[dlen + 1]))
+        return true;
+      return false;
+    }
+  else
+    {
+      /* Disks ending in letter (sda, vda) separate partitions directly with '<digit>' */
+      if (isdigit ((unsigned char) next))
+        return true;
+      return false;
+    }
+}
+
 /* Verifies that the target block device is not a mounted system partition unless forced */
 static void
 check_target_safety (dd_context_t *ctx)
@@ -116,8 +147,7 @@ check_target_safety (dd_context_t *ctx)
                     {
                       tgt_base++;
                       dev_base++;
-                      size_t tgt_len = strlen (tgt_base);
-                      if (strncmp (dev_base, tgt_base, tgt_len) == 0)
+                      if (is_partition_of_device (dev_base, tgt_base))
                         match = true;
                     }
                 }
@@ -625,7 +655,15 @@ autotune_sample_tick (dd_context_t *ctx, autotune_state_t *at)
     at->stage_rates[at->current_stage] = (double) bytes_transferred / ((double) stage_elapsed / XTIME_PRECISION);
 
   at->current_stage++;
-  if (at->current_stage < NUM_AUTOTUNE_STAGES)
+  bool abort_autotune = false;
+  if (at->total_byte_limit >= 0)
+    {
+      intmax_t remaining = at->total_byte_limit - ctx->stats.w_bytes;
+      if (remaining <= 0 || (at->current_stage < NUM_AUTOTUNE_STAGES && remaining < (intmax_t) autotune_stages[at->current_stage]))
+        abort_autotune = true;
+    }
+
+  if (at->current_stage < NUM_AUTOTUNE_STAGES && !abort_autotune)
     {
       ctx->cfg.input_blocksize = autotune_stages[at->current_stage];
       ctx->cfg.output_blocksize = autotune_stages[at->current_stage];
@@ -646,7 +684,8 @@ autotune_sample_tick (dd_context_t *ctx, autotune_state_t *at)
     {
       size_t best_stage = 0;
       double best_rate = at->stage_rates[0];
-      for (size_t s = 1; s < NUM_AUTOTUNE_STAGES; s++)
+      size_t max_evaluated = at->current_stage < NUM_AUTOTUNE_STAGES ? at->current_stage : NUM_AUTOTUNE_STAGES;
+      for (size_t s = 1; s < max_evaluated; s++)
         {
           if (at->stage_rates[s] > best_rate)
             {

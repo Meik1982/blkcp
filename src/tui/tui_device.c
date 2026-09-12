@@ -12,6 +12,30 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
+#include <ctype.h>
+
+static inline bool
+is_partition_of_device(char const *dev_name, char const *disk_name)
+{
+    size_t dlen = strlen(disk_name);
+    if (dlen == 0 || strncmp(dev_name, disk_name, dlen) != 0)
+        return false;
+
+    char next = dev_name[dlen];
+    if (next == '\0')
+        return true;
+
+    char last_disk_char = disk_name[dlen - 1];
+    if (isdigit((unsigned char)last_disk_char)) {
+        if (next == 'p' && isdigit((unsigned char)dev_name[dlen + 1]))
+            return true;
+        return false;
+    } else {
+        if (isdigit((unsigned char)next))
+            return true;
+        return false;
+    }
+}
 
 static void
 trim_string(char *s)
@@ -78,8 +102,7 @@ check_mount_status(tui_device_t *dev)
                 if (tgt_base && dev_base) {
                     tgt_base++;
                     dev_base++;
-                    size_t tgt_len = strlen(tgt_base);
-                    if (strncmp(dev_base, tgt_base, tgt_len) == 0)
+                    if (is_partition_of_device(dev_base, tgt_base))
                         matches = true;
                 }
             }

@@ -123,4 +123,14 @@ OUT_ASYNC_SHA=$(sha256sum "$TMP_DIR/rand_async_out.bin" | awk '{print $1}')
 [[ "$EXPECTED_ASYNC_SHA" == "$OUT_ASYNC_SHA" ]]
 echo "Test 17 passed: Multi-threaded async double-buffering pipeline bit-exactness"
 
-echo "=== All 17 extended tests passed successfully! ==="
+# Test 18: Autotune staging on small transfers (< 64 KB) and exact byte counts
+head -c 12345 /dev/urandom > "$TMP_DIR/rand_small.bin"
+EXPECTED_SMALL_SHA=$(sha256sum "$TMP_DIR/rand_small.bin" | awk '{print $1}')
+$DD_BIN if="$TMP_DIR/rand_small.bin" of="$TMP_DIR/rand_small_out.bin" bs=auto count=12345 iflag=count_bytes status=none
+OUT_SMALL_SHA=$(sha256sum "$TMP_DIR/rand_small_out.bin" | awk '{print $1}')
+[[ "$EXPECTED_SMALL_SHA" == "$OUT_SMALL_SHA" ]]
+ACTUAL_SIZE=$(stat -c %s "$TMP_DIR/rand_small_out.bin")
+[[ "$ACTUAL_SIZE" -eq 12345 ]]
+echo "Test 18 passed: Autotune staging on small transfers (< 64 KB) with exact byte counting"
+
+echo "=== All 18 extended tests passed successfully! ==="

@@ -84,16 +84,16 @@ _GL_ATTRIBUTE_MALLOC _GL_ATTRIBUTE_ALLOC_SIZE ((2))
 void *
 alignalloc (idx_t alignment, idx_t size)
 {
-  if ((size_t) -1 < alignment)
+  if (alignment < 0 || (uintmax_t) alignment > (size_t) -1)
     alignment = (size_t) -1;
-  if ((size_t) -1 < size)
+  if (size < 0 || (uintmax_t) size > (size_t) -1)
     size = (size_t) -1;
 
 # if ALIGNALLOC_VIA_ALIGNED_ALLOC
   return aligned_alloc (alignment, size);
 # else
   void *ptr = NULL;
-  if (alignment < sizeof (void *))
+  if ((size_t) alignment < sizeof (void *))
     alignment = sizeof (void *);
   errno = posix_memalign (&ptr, alignment, size | !size);
 #  if defined __CHERI_PURE_CAPABILITY__

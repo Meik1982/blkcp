@@ -148,17 +148,17 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
         }
     }
 
-    char cmd[1024];
-    tui_build_command(form, cmd, sizeof cmd);
-
-    /* Direct absolute binary path */
-    char full_cmd[1600];
+    char full_bin[600] = "./dd";
     char cwd[512];
     if (getcwd(cwd, sizeof cwd)) {
-        snprintf(full_cmd, sizeof full_cmd, "%.400s/dd %.1024s 2>&1", cwd, cmd + 4);
-    } else {
-        snprintf(full_cmd, sizeof full_cmd, "%.1024s 2>&1", cmd);
+        snprintf(full_bin, sizeof full_bin, "%.500s/dd", cwd);
     }
+
+    char cmd_body[1600];
+    tui_build_command(form, full_bin, cmd_body, sizeof cmd_body);
+
+    char full_cmd[2048];
+    snprintf(full_cmd, sizeof full_cmd, "%s 2>&1", cmd_body);
 
     snprintf(form->status_msg, sizeof form->status_msg, "Kopieren laeuft... bitte warten.");
     form->progress_pct = 10.0;
@@ -353,7 +353,7 @@ main(void)
                 execute_dd_job(win, &form);
             } else if (form.active_field == FIELD_BTN_COPY) {
                 char cmd[1024];
-                tui_build_command(&form, cmd, sizeof cmd);
+                tui_build_command(&form, "./dd", cmd, sizeof cmd);
                 copy_to_clipboard(&form, cmd);
             } else if (form.active_field == FIELD_BTN_QUIT) {
                 running = false;

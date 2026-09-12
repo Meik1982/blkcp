@@ -138,7 +138,7 @@ tui_render(WINDOW *win, tui_form_t const *form)
 
     /* Title */
     wattron(win, A_BOLD | COLOR_PAIR(4));
-    mvwprintw(win, 0, 4, " [ dd TUI: High-Performance Disk & Image Manager ] ");
+    mvwprintw(win, 0, 13, " [ dd TUI: High-Performance Disk & Image Manager ] ");
     wattroff(win, A_BOLD | COLOR_PAIR(4));
 
     /* Section 1: Ein- und Ausgabe */
@@ -212,7 +212,7 @@ tui_render(WINDOW *win, tui_form_t const *form)
     for (int i = 1; i < box_w - 1; i++)
         waddch(win, ACS_HLINE);
     mvwaddch(win, st_y, box_x + box_w - 1, ACS_URCORNER);
-    mvwprintw(win, st_y, box_x + 4, " [ Live Status ] ");
+    mvwprintw(win, st_y, box_x + 28, " [ Live Status ] ");
 
     for (int y = 1; y < box_h - 1; y++) {
         mvwaddch(win, st_y + y, box_x, ACS_VLINE);
@@ -255,14 +255,14 @@ tui_render(WINDOW *win, tui_form_t const *form)
     char cmd[1024];
     tui_build_command(form, cmd, sizeof cmd);
     wattron(win, A_DIM);
-    mvwprintw(win, 26, 2, "Befehl: %-68.68s", cmd);
+    mvwprintw(win, 26, 2, "Befehl: %-66.66s", cmd);
     wattroff(win, A_DIM);
 
     /* Action Buttons */
     int btn_y = 28;
-    draw_button(win, btn_y, 4, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
-    draw_button(win, btn_y, 25, "BEFEHL KOPIEREN", form->active_field == FIELD_BTN_COPY, 4);   /* Blue */
-    draw_button(win, btn_y, 49, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
+    draw_button(win, btn_y, 7, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
+    draw_button(win, btn_y, 30, "BEFEHL KOPIEREN", form->active_field == FIELD_BTN_COPY, 4);   /* Blue */
+    draw_button(win, btn_y, 55, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
 
     wrefresh(win);
 }

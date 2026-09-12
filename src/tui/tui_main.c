@@ -171,20 +171,28 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
     }
 
     char line[512];
+    char last_err[256] = "";
+
     while (fgets(line, sizeof line, fp)) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+
         if (strncmp(line, "sha256: ", 8) == 0) {
             snprintf(form->sha256_result, sizeof form->sha256_result, "%.64s", line + 8);
-            /* Strip newline */
-            char *nl = strchr(form->sha256_result, '\n');
-            if (nl) *nl = '\0';
         } else if (strstr(line, "copied")) {
             snprintf(form->status_msg, sizeof form->status_msg, "%.60s", line);
-            char *nl = strchr(form->status_msg, '\n');
-            if (nl) *nl = '\0';
             form->progress_pct = 75.0;
             tui_render(main_win, form);
         } else if (strstr(line, "SAFETY GUARD")) {
-            snprintf(form->status_msg, sizeof form->status_msg, "ABBRUCH: Safety Guard hat Root-Ueberschreiben verhindert!");
+            snprintf(last_err, sizeof last_err, "Safety Guard: Ziel enthaelt gemountetes Root!");
+        } else {
+            char const *p = line;
+            if (strncmp(p, "./dd: ", 6) == 0) p += 6;
+            else if (strncmp(p, "dd: ", 4) == 0) p += 4;
+            while (*p == ' ') p++;
+            if (*p != '\0') {
+                snprintf(last_err, sizeof last_err, "%.200s", p);
+            }
         }
     }
 
@@ -194,8 +202,12 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
         if (form->status_msg[0] == '\0' || strstr(form->status_msg, "Kopieren laeuft"))
             snprintf(form->status_msg, sizeof form->status_msg, "Erfolgreich abgeschlossen (100%%)!");
     } else {
-        if (!strstr(form->status_msg, "ABBRUCH"))
-            snprintf(form->status_msg, sizeof form->status_msg, "Fehler oder Abbruch (Exit %d)", WEXITSTATUS(rc));
+        form->progress_pct = 0.0;
+        if (last_err[0] != '\0') {
+            snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: %.54s", last_err);
+        } else {
+            snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: Kopieren fehlgeschlagen (Exit %d)", WEXITSTATUS(rc));
+        }
     }
 }
 

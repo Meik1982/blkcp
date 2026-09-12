@@ -220,7 +220,11 @@ tui_render(WINDOW *win, tui_form_t const *form)
     bar[bar_w] = '\0';
 
     mvwprintw(win, st_y + 1, 2, "│ [%s] %3.0f%%   │", bar, form->progress_pct);
+    if (strncmp(form->status_msg, "FEHLER:", 7) == 0)
+        wattron(win, COLOR_PAIR(1) | A_BOLD);
     mvwprintw(win, st_y + 2, 2, "│ %-62.62s │", form->status_msg);
+    if (strncmp(form->status_msg, "FEHLER:", 7) == 0)
+        wattroff(win, COLOR_PAIR(1) | A_BOLD);
     if (form->sha256_result[0])
         mvwprintw(win, st_y + 3, 2, "│ SHA256: %.54s │", form->sha256_result);
     else

@@ -10,7 +10,7 @@ SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c src/ar
 OBJS = $(SRCS:.c=.o)
 DEPS = $(OBJS:.o=.d)
 
-TUI_SRCS = src/tui/tui_device.c src/tui/tui_file_picker.c src/tui/tui_render.c src/tui/tui_main.c
+TUI_SRCS = src/tui/tui_device.c src/tui/tui_file_picker.c src/tui/tui_render.c src/tui/tui_nav.c src/tui/tui_main.c
 TUI_OBJS = $(TUI_SRCS:.c=.o)
 TUI_DEPS = $(TUI_OBJS:.o=.d)
 TUI_LIBS = -lncursesw

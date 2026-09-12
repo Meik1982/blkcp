@@ -10,6 +10,7 @@
 #include "tui_render.h"
 #include "tui_device.h"
 #include "tui_file_picker.h"
+#include "tui_nav.h"
 
 #include <locale.h>
 #include <ncurses.h>
@@ -236,16 +237,30 @@ main(void)
 
         switch (ch) {
         case '\t':
-        case KEY_DOWN:
             form.active_field = (form.active_field + 1) % FIELD_COUNT_TOTAL;
             break;
 
         case KEY_BTAB:
-        case KEY_UP:
             if (form.active_field == 0)
                 form.active_field = FIELD_COUNT_TOTAL - 1;
             else
                 form.active_field--;
+            break;
+
+        case KEY_UP:
+            form.active_field = tui_nav_up(form.active_field);
+            break;
+
+        case KEY_DOWN:
+            form.active_field = tui_nav_down(form.active_field);
+            break;
+
+        case KEY_LEFT:
+            form.active_field = tui_nav_left(form.active_field);
+            break;
+
+        case KEY_RIGHT:
+            form.active_field = tui_nav_right(form.active_field);
             break;
 
         case ' ':

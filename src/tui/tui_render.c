@@ -246,10 +246,21 @@ tui_render(WINDOW *win, tui_form_t const *form)
     if (strncmp(form->status_msg, "FEHLER:", 7) == 0)
         wattroff(win, COLOR_PAIR(1) | A_BOLD);
 
-    if (form->sha256_result[0])
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: %.60s", form->sha256_result);
-    else
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: (wird bei Abschluss berechnet)");
+    if (form->sha256_result[0]) {
+        wattron(win, A_BOLD | COLOR_PAIR(2));
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: %.64s", form->sha256_result);
+        wattroff(win, A_BOLD | COLOR_PAIR(2));
+    } else if (!form->opt_sha256) {
+        wattron(win, A_DIM);
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: (deaktiviert)                                            ");
+        wattroff(win, A_DIM);
+    } else if (form->running) {
+        wattron(win, A_BOLD | COLOR_PAIR(4));
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: [Streaming in-flight...]                                 ");
+        wattroff(win, A_BOLD | COLOR_PAIR(4));
+    } else {
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: (Streaming-Hash aktiv - On-the-Fly)                     ");
+    }
 
     /* Live Command Preview */
     char cmd[1024];

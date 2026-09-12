@@ -162,10 +162,13 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
 
     snprintf(form->status_msg, sizeof form->status_msg, "Kopieren laeuft... bitte warten.");
     form->progress_pct = 10.0;
+    form->running = true;
+    form->sha256_result[0] = '\0';
     tui_render(main_win, form);
 
     FILE *fp = popen(full_cmd, "r");
     if (!fp) {
+        form->running = false;
         snprintf(form->status_msg, sizeof form->status_msg, "Fehler beim Starten von dd!");
         return;
     }
@@ -197,6 +200,7 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
     }
 
     int rc = pclose(fp);
+    form->running = false;
     if (rc == 0) {
         form->progress_pct = 100.0;
         if (form->status_msg[0] == '\0' || strstr(form->status_msg, "Kopieren laeuft"))

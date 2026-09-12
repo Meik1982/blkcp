@@ -110,7 +110,7 @@ $ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
 ### Interaktiver TUI-Manager (`dd-tui`)
 Komfortabler, maus- und tastaturgesteuerter Terminal-Assistent auf Basis von `ncursesw`:
 * **Block-Device Erkennung:** Erkennt USB-Sticks und Festplatten automatisch via `/sys/block`, zeigt Gerätemodelle und Größen an und markiert System-Laufwerke (`/`, `/boot`, `/home`) mit Schutzsperren.
-* **Integrierter Dateibrowser:** Komfortables Auswählen von `.iso`-, `.img`- und `.raw`-Dateien.
+* **Integrierter Dateibrowser:** Komfortables Auswählen von `.iso`-, `.img`- und `.raw`-Dateien sowie Anlegen neuer Zieldateien direkt im aktiven Ordner mit der Taste `[N]`.
 * **Befehlsgenerator & Clipboard:** Erzeugt die exakte CLI-Kommandozeile in Echtzeit und kopiert sie auf Knopfdruck in die X11-/Wayland-Zwischenablage.
 * **Sicherheits-Popup:** Erzwingt eine bewusste Bestätigung vor Schreibzugriffen auf physische Datenträger.
 ```bash

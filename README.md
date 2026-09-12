@@ -107,22 +107,38 @@ Entkoppelt den Lesestrom (`reader_thread`) vom Schreibstrom (`writer_thread`) ü
 $ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
 ```
 
+### Interaktiver TUI-Manager (`dd-tui`)
+Komfortabler, maus- und tastaturgesteuerter Terminal-Assistent auf Basis von `ncursesw`:
+* **Block-Device Erkennung:** Erkennt USB-Sticks und Festplatten automatisch via `/sys/block`, zeigt Gerätemodelle und Größen an und markiert System-Laufwerke (`/`, `/boot`, `/home`) mit Schutzsperren.
+* **Integrierter Dateibrowser:** Komfortables Auswählen von `.iso`-, `.img`- und `.raw`-Dateien.
+* **Befehlsgenerator & Clipboard:** Erzeugt die exakte CLI-Kommandozeile in Echtzeit und kopiert sie auf Knopfdruck in die X11-/Wayland-Zwischenablage.
+* **Sicherheits-Popup:** Erzwingt eine bewusste Bestätigung vor Schreibzugriffen auf physische Datenträger.
+```bash
+# Starten des TUI-Managers:
+./dd-tui
+# oder über das Makefile:
+make tui
+```
+
 ---
 
 ## 5. Bauen, Testen & Benchmarking
 
 ### Kompilieren & Standard-Targets
 ```bash
-# Release-Build kompilieren
+# Release-Build (erstellt sowohl 'dd' als auch 'dd-tui'):
 make clean all
 
-# Alle 17 Regressionstests ausführen
+# Interaktiven TUI-Manager starten:
+make tui
+
+# Alle 17 Regressionstests ausführen:
 make test
 
-# Vergleichs-Benchmark gegen GNU dd ausführen
+# Vergleichs-Benchmark gegen GNU dd ausführen:
 make benchmark
 
-# Manpage anzeigen
+# Manpage anzeigen:
 make man
 ```
 *Das Makefile unterstützt automatische Header-Dependency-Verfolgung (`-MMD -MP`).*

@@ -133,4 +133,20 @@ ACTUAL_SIZE=$(stat -c %s "$TMP_DIR/rand_small_out.bin")
 [[ "$ACTUAL_SIZE" -eq 12345 ]]
 echo "Test 18 passed: Autotune staging on small transfers (< 64 KB) with exact byte counting"
 
-echo "=== All 18 extended tests passed successfully! ==="
+# Test 19: Kernel Zero-Copy / Reflink copy (conv=reflink / opt=reflink)
+head -c 16777216 /dev/urandom > "$TMP_DIR/rand_reflink.bin"
+EXPECTED_REFLINK_SHA=$(sha256sum "$TMP_DIR/rand_reflink.bin" | awk '{print $1}')
+$DD_BIN if="$TMP_DIR/rand_reflink.bin" of="$TMP_DIR/rand_reflink_out.bin" conv=reflink status=none
+OUT_REFLINK_SHA=$(sha256sum "$TMP_DIR/rand_reflink_out.bin" | awk '{print $1}')
+[[ "$EXPECTED_REFLINK_SHA" == "$OUT_REFLINK_SHA" ]]
+REFLINK_SIZE=$(stat -c %s "$TMP_DIR/rand_reflink_out.bin")
+[[ "$REFLINK_SIZE" -eq 16777216 ]]
+
+# Also verify opt=reflink alias with count and bs
+$DD_BIN if="$TMP_DIR/rand_reflink.bin" of="$TMP_DIR/rand_reflink_chunk.bin" opt=reflink bs=1M count=4 status=none
+CHUNK_SIZE=$(stat -c %s "$TMP_DIR/rand_reflink_chunk.bin")
+[[ "$CHUNK_SIZE" -eq 4194304 ]]
+cmp -n 4194304 "$TMP_DIR/rand_reflink.bin" "$TMP_DIR/rand_reflink_chunk.bin"
+echo "Test 19 passed: Kernel Zero-Copy copy_file_range/reflink bit-exactness and count chunking"
+
+echo "=== All 19 extended tests passed successfully! ==="

@@ -48,7 +48,8 @@ enum dd_conversions
   C_AUTOTUNE = 0400000,
   C_FORCE = 01000000,
   C_SHA256 = 02000000,
-  C_ASYNC = 04000000
+  C_ASYNC = 04000000,
+  C_REFLINK = 010000000
 };
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))

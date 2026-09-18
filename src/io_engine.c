@@ -968,6 +968,155 @@ dd_copy_async (dd_context_t *ctx)
   return exit_status;
 }
 
+/**
+ * @brief Attempts kernel-space zero-copy and reflink data transfer using copy_file_range(2).
+ *
+ * This function bypasses userspace buffer copies entirely by offloading chunk transfers
+ * directly to the kernel VFS. On copy-on-write filesystems (Btrfs, XFS, ZFS), this yields
+ * instantaneous, zero-space reflink clones.
+ *
+ * Compatibility conditions:
+ * - Operating system is Linux (kernel >= 4.5).
+ * - Both input and output descriptors refer to regular files (S_ISREG).
+ * - No content-modifying conversions (case-folding, swab, sha256 hashing, unblock/block).
+ * - No sparse emulation or direct I/O cache bypass modes requested.
+ *
+ * @param ctx Runtime execution context containing configuration, file descriptors, and stats.
+ * @param handled Output flag set to true if copy_file_range processed the operation (or encountered
+ *                a non-recoverable error), false if userspace fallback should be performed.
+ * @return EXIT_SUCCESS on completion, or EXIT_FAILURE on fatal transfer error.
+ */
+static int
+dd_copy_reflink (dd_context_t *ctx, bool *handled)
+{
+  *handled = false;
+
+#if defined __linux__
+  /* Incompatible conversions that inspect, pad or mutate data in userspace */
+  int incompatible_conv = C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK
+                        | C_LCASE | C_UCASE | C_SWAB | C_SYNC | C_SHA256
+                        | C_SPARSE;
+
+  if (ctx->cfg.conversions_mask & incompatible_conv)
+    return EXIT_SUCCESS;
+
+  if (ctx->iread_fnc != NULL)
+    return EXIT_SUCCESS;
+
+  if (ctx->cfg.i_nocache || ctx->cfg.o_nocache)
+    return EXIT_SUCCESS;
+
+  if ((ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
+      || (ctx->cfg.output_flags & (O_DIRECT | O_NOCACHE)))
+    return EXIT_SUCCESS;
+
+  struct stat st_in, st_out;
+  if (fstat (STDIN_FILENO, &st_in) != 0 || !S_ISREG (st_in.st_mode))
+    return EXIT_SUCCESS;
+  if (fstat (STDOUT_FILENO, &st_out) != 0 || !S_ISREG (st_out.st_mode))
+    return EXIT_SUCCESS;
+
+  /* If user did not explicitly request reflink and autotune is active, let autotune measure throughput */
+  if (!(ctx->cfg.conversions_mask & C_REFLINK))
+    {
+      if (ctx->cfg.conversions_mask & C_AUTOTUNE)
+        return EXIT_SUCCESS;
+    }
+
+  /* Determine total byte transfer limit from count= and iflag=count_bytes if configured */
+  intmax_t total_byte_limit = -1;
+  if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
+    {
+      total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
+    }
+  else if (ctx->cfg.max_records != INTMAX_MAX || ctx->cfg.max_bytes != 0)
+    {
+      total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
+    }
+
+  if (total_byte_limit == 0)
+    {
+      *handled = true;
+      return EXIT_SUCCESS;
+    }
+
+  /* Choose an interactive chunk size between 16 MiB and 64 MiB to allow regular progress reports */
+  size_t chunk_size = MAX (ctx->cfg.output_blocksize, 16 * 1024 * 1024);
+  if (chunk_size > 64 * 1024 * 1024)
+    chunk_size = 64 * 1024 * 1024;
+
+  while (true)
+    {
+      if (active_ctx)
+        dd_check_signals (active_ctx);
+
+      size_t to_copy = chunk_size;
+      if (total_byte_limit >= 0)
+        {
+          intmax_t remaining = total_byte_limit - ctx->stats.w_bytes;
+          if (remaining <= 0)
+            break;
+          if ((uintmax_t)remaining < to_copy)
+            to_copy = (size_t)remaining;
+        }
+
+      ssize_t ret = copy_file_range (STDIN_FILENO, NULL, STDOUT_FILENO, NULL, to_copy, 0);
+
+      if (ret < 0)
+        {
+          if (errno == EINTR)
+            continue;
+
+          /* If zero bytes written so far and the filesystem/kernel rejects copy_file_range
+             (e.g., cross-device EXDEV or unsupported filesystem),
+             gracefully fall back to standard userspace copy loop unless explicitly forced. */
+          if (ctx->stats.w_bytes == 0 && (errno == EXDEV || errno == ENOSYS || errno == EOPNOTSUPP || errno == EINVAL))
+            {
+              if (ctx->cfg.conversions_mask & C_REFLINK)
+                {
+                  diagnose (errno, _("copy_file_range not supported for %s to %s"),
+                            quoteaf (ctx->cfg.input_file), quoteaf (ctx->cfg.output_file));
+                  *handled = true;
+                  return EXIT_FAILURE;
+                }
+              /* Opportunistic fallback */
+              *handled = false;
+              return EXIT_SUCCESS;
+            }
+
+          diagnose (errno, _("error copying %s to %s via copy_file_range"),
+                    quoteaf (ctx->cfg.input_file), quoteaf (ctx->cfg.output_file));
+          *handled = true;
+          return EXIT_FAILURE;
+        }
+
+      if (ret == 0)
+        break; /* End of input file reached */
+
+      ctx->stats.w_bytes += ret;
+
+      /* Keep block telemetry consistent with configured input and output block sizes */
+      ctx->stats.r_full += ret / ctx->cfg.input_blocksize;
+      if (ret % ctx->cfg.input_blocksize)
+        ctx->stats.r_partial++;
+
+      ctx->stats.w_full += ret / ctx->cfg.output_blocksize;
+      if (ret % ctx->cfg.output_blocksize)
+        ctx->stats.w_partial++;
+
+      if (ctx->cfg.status_level == STATUS_PROGRESS)
+        dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+    }
+
+  *handled = true;
+  return EXIT_SUCCESS;
+#else
+  (void)ctx;
+  *handled = false;
+  return EXIT_SUCCESS;
+#endif
+}
+
 static int
 dd_copy (dd_context_t *ctx)
 {
@@ -1026,6 +1175,12 @@ dd_copy (dd_context_t *ctx)
 
   if ((ctx->cfg.conversions_mask & C_ASYNC) || (ctx->cfg.output_flags & O_ASYNC_PIPELINE))
     return dd_copy_async (ctx);
+
+  /* Attempt kernel-space zero-copy / reflink fast path via copy_file_range(2) */
+  bool cfr_handled = false;
+  int cfr_status = dd_copy_reflink (ctx, &cfr_handled);
+  if (cfr_handled)
+    return cfr_status;
 
   alloc_ibuf (ctx);
   alloc_obuf (ctx);

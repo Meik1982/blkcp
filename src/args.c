@@ -51,6 +51,10 @@ static struct symbol_value const conversions[] =
   {"sha256", C_SHA256},
   {"hash", C_SHA256},
   {"async", C_ASYNC},
+  {"reflink", C_REFLINK},
+  {"cfr", C_REFLINK},
+  {"zero-copy", C_REFLINK},
+  {"zerocopy", C_REFLINK},
   {"", 0}
 };
 
@@ -343,6 +347,9 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
                 cfg->conversions_mask |= C_SHA256;
               else if (operand_matches (tok, "async", 0) || operand_matches (tok, "pipeline", 0))
                 cfg->conversions_mask |= C_ASYNC;
+              else if (operand_matches (tok, "reflink", 0) || operand_matches (tok, "cfr", 0)
+                       || operand_matches (tok, "zero-copy", 0) || operand_matches (tok, "zerocopy", 0))
+                cfg->conversions_mask |= C_REFLINK;
               else
                 {
                   error (0, 0, _("unrecognized option in opt: %s"), quoteaf (tok));

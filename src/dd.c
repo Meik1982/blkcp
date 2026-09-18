@@ -62,7 +62,7 @@ Copy a file, converting and formatting according to the operands.\n\
   obs=BYTES       write BYTES bytes at a time (default: 512)\n\
   of=FILE         write to FILE instead of stdout\n\
   oflag=FLAGS     write as per the comma separated symbol list\n\
-  opt=FEATURE     enable modern extensions ('auto', 'force', 'sha256', 'async')\n\
+  opt=FEATURE     enable modern extensions ('auto', 'force', 'sha256', 'async', 'reflink')\n\
   seek=N          (or oseek=N) skip N obs-sized output blocks\n\
   skip=N          (or iseek=N) skip N ibs-sized input blocks\n\
   status=LEVEL    The LEVEL of information to print to stderr;\n\
@@ -88,6 +88,7 @@ Each CONV symbol may be:\n\
   sparse    try to seek rather than write the output for NUL input blocks\n\
   autotune  dynamically benchmark and select optimal block size while copying\n\
   sha256    compute streaming SHA-256 digest on-the-fly while copying\n\
+  reflink   use kernel zero-copy copy_file_range(2) for instant CoW/reflink\n\
   force     override safety guard protection when writing to system devices\n\
   async     enable multi-threaded reader/writer double-buffering pipeline\n\
   swab      swap every pair of input bytes\n\

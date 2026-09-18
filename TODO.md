@@ -8,9 +8,8 @@ Dieses Dokument erfasst alle im abschließenden Code-Check identifizierten Optim
 - [ ] **Linux `io_uring` Backend:**
   - *Beschreibung:* Ergänzung eines alternativen I/O-Treibers in `src/io_engine.c` basierend auf `io_uring` Submission-/Completion-Queues.
   - *Nutzen:* Vollständig asynchroner I/O, Reduktion von Kontextwechseln (Syscalls) auf fast 0 bei hohen Queue-Depths; ideal für NVMe-Arrays.
-- [ ] **`copy_file_range(2)` & Reflink-Support:**
-  - *Beschreibung:* Automatische Nutzung von In-Kernel Zero-Copy und Copy-on-Write-Klonen (Btrfs, XFS), wenn Source und Target reguläre Dateien sind und keine blockverändernden Konvertierungen anliegen.
-  - *Nutzen:* Nahezu instantanes Duplizieren großer Images ohne physische Disk-Schreiblast.
+- [x] **`copy_file_range(2)` & Reflink-Support:**
+  - *Status:* Erledigt. `dd_copy_reflink()` implementiert (`conv=reflink`, `opt=reflink` oder automatische Erkennung). Nutzt unter Linux den Syscall `copy_file_range(2)`, wenn Ein- und Ausgabe reguläre Dateien sind und keine blockverändernden Konvertierungen aktiv sind. Auf CoW-Dateisystemen (Btrfs, XFS) werden sofortige Reflink-Clones erzeugt; bei Inkompatibilität oder Dateisystemgrenzen greift ein eleganter, nahtloser Fallback auf den Standard-Userspace-Pfad. Verifiziert in Regressionstest 19.
 - [x] **Multi-Threaded Double-Buffering (Async Pipeline):**
   - *Status:* Erledigt. Multi-Threaded Double-Buffering Pipeline mit Ringpuffer (`ASYNC_QUEUE_CAPACITY = 8`) via POSIX-Threads (`pthread`) implementiert (`opt=async` / `conv=async` / `oflag=async`). Entkoppelt Reader und Writer vollständig, blockiert Signale im Worker-Thread zur Vermeidung von Handler-Kollisionen und unterstützt Streaming-SHA-256 transparent. In Regressionstest 17 verifiziert.
 

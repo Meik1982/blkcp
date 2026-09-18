@@ -107,6 +107,16 @@ Entkoppelt den Lesestrom (`reader_thread`) vom Schreibstrom (`writer_thread`) ü
 $ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
 ```
 
+### In-Kernel Zero-Copy & CoW Reflink-Cloning (`conv=reflink` / `opt=reflink`)
+Nutzt unter Linux den Syscall `copy_file_range(2)`, wenn Ein- und Ausgabedatei reguläre Dateien sind und keine modifizierenden Konvertierungen aktiv sind:
+* **Instantanes Klonen auf CoW-Dateisystemen:** Auf Btrfs, XFS und ZFS werden Dateikopien und Disk-Images ohne physische Schreiblast als Copy-on-Write Reflinks in Millisekunden erzeugt.
+* **In-Kernel Zero-Copy:** Bei herkömmlichen Dateisystemen entfällt der Userspace-Kopieraufwand komplett, da der Datentransfer direkt auf VFS-/Page-Cache-Ebene abläuft.
+* **Transparenter Fallback:** Kann das Dateisystem keine Reflinks (z. B. bei Partitionsgrenzen), fällt `dd` nahtlos auf die Standard-Pufferung zurück.
+```bash
+# Großes VM-Image via Reflink instantan duplizieren:
+$ ./dd if=ubuntu-vm.qcow2 of=ubuntu-vm-clone.qcow2 conv=reflink status=progress
+```
+
 ### Interaktiver TUI-Manager (`dd-tui`)
 Komfortabler, maus- und tastaturgesteuerter Terminal-Assistent auf Basis von `ncursesw`:
 * **Block-Device Erkennung:** Erkennt USB-Sticks und Festplatten automatisch via `/sys/block`, zeigt Gerätemodelle und Größen an und markiert System-Laufwerke (`/`, `/boot`, `/home`) mit Schutzsperren.

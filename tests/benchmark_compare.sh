@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Benchmark comparison script: Local optimized dd vs System /usr/bin/dd
+# Benchmark comparison script: blkcp (optimized) vs System /usr/bin/dd
 set -euo pipefail
 export LC_ALL=C
 
-LOCAL_DD="./dd"
+LOCAL_DD="./blkcp"
+if [[ ! -x "$LOCAL_DD" && -x "./dd" ]]; then
+  LOCAL_DD="./dd"
+fi
 SYSTEM_DD="/usr/bin/dd"
 
 if [[ ! -x "$LOCAL_DD" ]]; then
@@ -16,11 +19,11 @@ if [[ ! -x "$SYSTEM_DD" ]]; then
   exit 1
 fi
 
-TMP_DIR=$(mktemp -d -t dd_bench_XXXXXX)
+TMP_DIR=$(mktemp -d -t blkcp_bench_XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "======================================================================"
-echo "         Performance Benchmark: Local dd vs. System dd                "
+echo "         Performance Benchmark: blkcp vs. System dd                   "
 echo "======================================================================"
 echo "Local Binary:  $LOCAL_DD ($(ls -lh "$LOCAL_DD" | awk '{print $5}'))"
 echo "System Binary: $SYSTEM_DD ($(ls -lh "$SYSTEM_DD" | awk '{print $5}'))"

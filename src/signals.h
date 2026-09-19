@@ -3,7 +3,7 @@
 
 #include <signal.h>
 #include <stdbool.h>
-#include "dd_config.h"
+#include "blkcp_config.h"
 
 #ifdef __cplusplus
 extern "C" {

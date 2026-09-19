@@ -1,16 +1,17 @@
-# dd (Modular & Optimized Edition)
+# blkcp (Block Copy: Next-Generation High-Performance Block Copy & Imaging Tool)
 
-Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch entflochtene Version des klassischen Unix-/Linux-Tools `dd`.
+Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch entflochtene Neuentwicklung auf Basis des klassischen Unix-/Linux-Tools `dd`. Vollständig abwärtskompatibel zu `dd`-Befehlszeilen, ergänzt um moderne In-Flight-Optimierer, Zero-Copy-Pfade, Mehrfaden-Double-Buffering und Sicherheitsfunktionen.
 
 ---
 
 ## 1. Herkunft & Lizenz des Quelltextes (Origin & Attributions)
 
-* **Ursprung:** GNU Coreutils (Version 9.5).
+* **Ursprung:** Basiert auf Kernkonzepten der GNU Coreutils (Version 9.5).
 * **Upstream-Quellen:** 
   * Offizielles GNU-Repository: <https://git.savannah.gnu.org/git/coreutils.git>
   * GitHub-Mirror: <https://github.com/coreutils/coreutils>
 * **Originalautoren:** Paul Rubin, David MacKenzie, Stuart Kemp und die Free Software Foundation, Inc.
+* **Weiterentwicklung & Architektur:** Meik (2026).
 * **Lizenz:** GNU General Public License v3 oder neuer (GPLv3+). Siehe <https://gnu.org/licenses/gpl.html>.
 
 ---
@@ -21,9 +22,9 @@ Der ursprüngliche 2.563-Zeilen-Monolith `dd.c` wurde vollständig in getrennte 
 
 ```
 src/
-├── dd.c                   # Schlanke Einstiegs- und Ablaufsteuerung (~175 Zeilen)
-├── dd_config.h            # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
-├── args.h / .c            # Operanden- & CLI-Parsing (if=, of=, bs=, Multiplikatoren, Validierung)
+├── blkcp.c                 # Schlanke Einstiegs- und Ablaufsteuerung (~175 Zeilen)
+├── blkcp_config.h          # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
+├── args.h / .c            # Operanden- & CLI-Parsing (if=, of=, bs=, tc=, Multiplikatoren, Validierung)
 ├── io_driver.h            # Einheitliches I/O-Treiber-Interface (Strategy Pattern / Inversion of Control)
 ├── io_engine_internal.h   # Geteilte I/O-Primitive und Diagnose-Deklarationen
 ├── io_engine.h / .c       # Zentrale Stream-Orchestrierung, Skip/Seek, Safety Guard & Transfer-Loop

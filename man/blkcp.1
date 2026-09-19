@@ -1,14 +1,14 @@
-.TH DD 1 "September 2026" "Modular dd (Optimized Edition)" "User Commands"
+.TH BLKCP 1 "September 2026" "blkcp (High-Performance Block Copy Utility)" "User Commands"
 .SH NAME
-dd \- convert and copy a file with dynamic autotuning, streaming hash and safety guards
+blkcp \- high-performance block copy utility with dynamic autotuning, zero-copy, streaming hash and safety guards
 .SH SYNOPSIS
-.B dd
+.B blkcp
 [\fI\,OPERAND\/\fR]...
 .br
-.B dd
+.B blkcp
 \fI\,OPTION\/\fR
 .SH DESCRIPTION
-Copy a file, converting and formatting according to the operands.
+Copy and convert files and block devices according to operands (modern high-performance replacement for dd).
 .PP
 Unlike traditional implementations, this modular and optimized edition provides dynamic in-flight I/O autotuning, zero-copy fast paths, SIMD-accelerated transformations, hardware block-size awareness, streaming SHA-256 integrity verification, and target safety guardrails against accidental host system destruction.
 .TP
@@ -176,37 +176,38 @@ To bypass this protection in emergency/rescue situations, supply \fBoflag=force\
 .PP
 Flash a Linux OS image to a USB stick with dynamic throughput autotuning and immediate verification:
 .RS
-.B dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
+.B blkcp if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
 .RE
 .PP
 Instantaneous CoW reflink cloning of a large virtual disk image on Linux:
 .RS
-.B dd if=ubuntu-vm.qcow2 of=ubuntu-vm-clone.qcow2 conv=reflink status=progress
+.B blkcp if=ubuntu-vm.qcow2 of=ubuntu-vm-clone.qcow2 conv=reflink status=progress
 .RE
 .PP
 Decompress and write an OS image on-the-fly via standard Unix pipeline:
 .RS
-.B zstd -dc archlinux.iso.zst | dd of=/dev/sdb bs=auto opt=async,hash status=progress
+.B zstd -dc archlinux.iso.zst | blkcp of=/dev/sdb bs=auto opt=async,hash status=progress
 .RE
 .PP
 Stream raw disk backup to remote storage over SSH with multi-threaded double-buffering:
 .RS
-.B dd if=/dev/nvme0n1 bs=auto opt=async,hash | ssh root@nas "cat > /backup/system.raw"
+.B blkcp if=/dev/nvme0n1 bs=auto opt=async,hash | ssh root@nas "cat > /backup/system.raw"
 .RE
 .PP
-Copy random test stream with 1 GB limit and exact byte counting:
+Copy exact byte count targeting regardless of block size:
 .RS
-.B dd if=/dev/urandom of=test.bin count=1G iflag=count_bytes bs=auto
+.B blkcp if=disk.img of=/dev/sdb bs=auto tc=4529848
 .RE
 .PP
 Create a 10 GB sparse file:
 .RS
-.B dd if=/dev/zero of=sparse.img bs=1M seek=10240 count=0
+.B blkcp if=/dev/zero of=sparse.img bs=1M seek=10240 count=0
 .RE
 .SH SIGNALS
-Sending a \fBSIGUSR1\fR signal to a running \fBdd\fR process makes it print I/O statistics to standard error and resume copying.
+Sending a \fBSIGUSR1\fR signal to a running \fBblkcp\fR process makes it print I/O statistics to standard error and resume copying.
 .SH AUTHORS
-Written by Paul Rubin, David MacKenzie, Stuart Kemp, and modularized/optimized in 2026.
+Written by Paul Rubin, David MacKenzie, Stuart Kemp, and modularized/enhanced by Meik in 2026.
 .SH SEE ALSO
+.BR dd (1),
 .BR cp (1),
 .BR sha256sum (1)

@@ -1,5 +1,5 @@
-#ifndef DD_CONFIG_H
-#define DD_CONFIG_H
+#ifndef BLKCP_CONFIG_H
+#define BLKCP_CONFIG_H
 
 #include <config.h>
 #include <stdbool.h>
@@ -201,4 +201,4 @@ extern dd_context_t *current_dd_ctx;
 }
 #endif
 
-#endif /* DD_CONFIG_H */
+#endif /* BLKCP_CONFIG_H */

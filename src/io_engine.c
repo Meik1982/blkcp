@@ -35,7 +35,7 @@
 #include "error.h"
 #include "xalloc.h"
 
-#include "dd_config.h"
+#include "blkcp_config.h"
 #include "stats.h"
 #include "signals.h"
 #include "conversions.h"

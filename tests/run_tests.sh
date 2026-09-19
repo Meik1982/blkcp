@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DD_BIN="./dd"
-TMP_DIR=$(mktemp -d -t dd_test_XXXXXX)
+DD_BIN="./blkcp"
+if [[ ! -x "$DD_BIN" && -x "./dd" ]]; then
+  DD_BIN="./dd"
+fi
+TMP_DIR=$(mktemp -d -t blkcp_test_XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-echo "=== Running Extended dd Compatibility Test Suite ==="
+echo "=== Running Extended blkcp / dd Test Suite ==="
 
 # Test 1: Basic stdin to stdout
 printf "hello world" | $DD_BIN status=none > "$TMP_DIR/out1"

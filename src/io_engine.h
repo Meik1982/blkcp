@@ -1,7 +1,7 @@
 #ifndef DD_IO_ENGINE_H
 #define DD_IO_ENGINE_H
 
-#include "dd_config.h"
+#include "blkcp_config.h"
 
 #ifdef __cplusplus
 extern "C" {

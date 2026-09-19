@@ -12,15 +12,16 @@
 #include "progname.h"
 #include "version.h"
 
-#include "dd_config.h"
+#include "blkcp_config.h"
 #include "args.h"
 #include "conversions.h"
 #include "stats.h"
 #include "signals.h"
 #include "io_engine.h"
 
-#define PROGRAM_NAME "dd"
+#define PROGRAM_NAME "blkcp"
 #define AUTHORS \
+  proper_name ("Meik"), \
   proper_name ("Paul Rubin"), \
   proper_name ("David MacKenzie"), \
   proper_name ("Stuart Kemp")
@@ -120,7 +121,7 @@ Each FLAG symbol may be:\n\
   force        override safety guard check against overwriting mounted system roots\n\
   async        enable multi-threaded reader/writer double-buffering pipeline\n\
 \n\
-Sending a USR1 signal to a running 'dd' process makes it\n\
+Sending a USR1 signal to a running 'blkcp' (or 'dd') process makes it\n\
 print I/O statistics to standard error and then resume copying.\n\
 \n\
 "), stdout);

@@ -2,3 +2,5 @@
 *.d
 dd
 dd-tui
+bin/
+

@@ -17,6 +17,12 @@ TUI_LIBS = -lncursesw
 
 all: $(TARGET) $(TARGET_TUI)
 
+release: CFLAGS = -O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
+release: LDFLAGS += -flto -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now
+release: clean $(TARGET) $(TARGET_TUI)
+	strip --strip-all $(TARGET) $(TARGET_TUI)
+	@echo "=== Release-Build abgeschlossen: Binaries vollständig gestrippt und optimiert (-O3, -flto) ==="
+
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
@@ -43,4 +49,16 @@ man:
 tui: $(TARGET_TUI)
 	./$(TARGET_TUI)
 
-.PHONY: all clean test benchmark man tui
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+MANDIR ?= $(PREFIX)/share/man/man1
+
+install: release
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 dd $(DESTDIR)$(BINDIR)/dd
+	install -m 755 dd-tui $(DESTDIR)$(BINDIR)/dd-tui
+	install -d $(DESTDIR)$(MANDIR)
+	install -m 644 man/dd.1 $(DESTDIR)$(MANDIR)/dd.1
+	@echo "=== Installation erfolgreich in $(DESTDIR)$(BINDIR) abgeschlossen ==="
+
+.PHONY: all release clean test benchmark man tui install

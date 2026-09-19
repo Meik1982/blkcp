@@ -12,6 +12,9 @@ extern "C" {
 /* Print transfer statistics (throughput, human-readable volume, elapsed time) */
 void dd_print_xfer_stats (const dd_stats_t *stats, int *progress_len, xtime_t progress_time);
 
+/* Periodically check elapsed time and print in-flight live progress line (\r) */
+void dd_check_progress (dd_stats_t *stats, int status_level);
+
 /* Print overall summary statistics (records in/out, truncated, transfer stats) */
 void dd_print_stats (const dd_stats_t *stats, int status_level, int *progress_len);
 

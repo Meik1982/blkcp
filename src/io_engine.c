@@ -485,6 +485,7 @@ write_output (dd_context_t *ctx)
   else
     ctx->stats.w_full++;
   ctx->oc = 0;
+  dd_check_progress (&ctx->stats, ctx->cfg.status_level);
 }
 
 static inline void
@@ -511,6 +512,7 @@ copy_simple (dd_context_t *ctx, char const *buf, idx_t nread)
           exit (EXIT_FAILURE);
         }
       ctx->stats.w_full++;
+      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
       return;
     }
 
@@ -933,6 +935,8 @@ dd_copy_async (dd_context_t *ctx)
           ctx->stats.w_full++;
         }
 
+      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
+
       pthread_mutex_lock (&pipe.mutex);
       pipe.head = (pipe.head + 1) % ASYNC_QUEUE_CAPACITY;
       pipe.count--;
@@ -1104,8 +1108,7 @@ dd_copy_reflink (dd_context_t *ctx, bool *handled)
       if (ret % ctx->cfg.output_blocksize)
         ctx->stats.w_partial++;
 
-      if (ctx->cfg.status_level == STATUS_PROGRESS)
-        dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
     }
 
   *handled = true;
@@ -1319,6 +1322,8 @@ dd_copy (dd_context_t *ctx)
 
           if (at.active)
             autotune_sample_tick (ctx, &at);
+
+          dd_check_progress (&ctx->stats, ctx->cfg.status_level);
           continue;
         }
 
@@ -1336,6 +1341,8 @@ dd_copy (dd_context_t *ctx)
 
       if (at.active)
         autotune_sample_tick (ctx, &at);
+
+      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
     }
 
   if (0 <= saved_byte)

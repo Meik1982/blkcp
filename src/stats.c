@@ -75,9 +75,24 @@ dd_print_xfer_stats (const dd_stats_t *stats, int *progress_len, xtime_t progres
         fprintf (stderr, "%*s", *progress_len - stats_len, "");
       if (progress_len)
         *progress_len = stats_len;
+      fflush (stderr);
     }
   else
     fputc ('\n', stderr);
+}
+
+void
+dd_check_progress (dd_stats_t *stats, int status_level)
+{
+  if (status_level != STATUS_PROGRESS)
+    return;
+
+  xtime_t now = gethrxtime ();
+  if (now >= stats->next_time)
+    {
+      dd_print_xfer_stats (stats, &stats->progress_len, now);
+      stats->next_time = now + XTIME_PRECISION;
+    }
 }
 
 void

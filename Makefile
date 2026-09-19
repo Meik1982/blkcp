@@ -16,25 +16,17 @@ TUI_DEPS = $(TUI_OBJS:.o=.d)
 TUI_LIBS = -lncursesw
 
 all: $(TARGET) $(TARGET_TUI)
-	@ln -sf $(TARGET) dd
-	@ln -sf $(TARGET_TUI) dd-tui
 	@mkdir -p bin
 	@cp -f $(TARGET) bin/$(TARGET)
 	@cp -f $(TARGET_TUI) bin/$(TARGET_TUI)
-	@ln -sf $(TARGET) bin/dd
-	@ln -sf $(TARGET_TUI) bin/dd-tui
 
 release: CFLAGS = -O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
 release: LDFLAGS += -flto -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now
 release: clean $(TARGET) $(TARGET_TUI)
 	strip --strip-all $(TARGET) $(TARGET_TUI)
-	@ln -sf $(TARGET) dd
-	@ln -sf $(TARGET_TUI) dd-tui
 	@mkdir -p bin
 	@cp -f $(TARGET) bin/$(TARGET)
 	@cp -f $(TARGET_TUI) bin/$(TARGET_TUI)
-	@ln -sf $(TARGET) bin/dd
-	@ln -sf $(TARGET_TUI) bin/dd-tui
 	@echo "=== Release-Build abgeschlossen: Binaries vollständig gestrippt und optimiert (-O3, -flto) ==="
 
 $(TARGET): $(OBJS)
@@ -49,7 +41,7 @@ $(TARGET_TUI): $(TUI_OBJS)
 -include $(DEPS) $(TUI_DEPS)
 
 clean:
-	rm -f $(OBJS) $(DEPS) $(TUI_OBJS) $(TUI_DEPS) $(TARGET) $(TARGET_TUI) dd dd-tui
+	rm -f $(OBJS) $(DEPS) $(TUI_OBJS) $(TUI_DEPS) $(TARGET) $(TARGET_TUI)
 
 test: $(TARGET)
 	./tests/run_tests.sh
@@ -71,11 +63,8 @@ install: release
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 	install -m 755 $(TARGET_TUI) $(DESTDIR)$(BINDIR)/$(TARGET_TUI)
-	ln -sf $(TARGET) $(DESTDIR)$(BINDIR)/dd
-	ln -sf $(TARGET_TUI) $(DESTDIR)$(BINDIR)/dd-tui
 	install -d $(DESTDIR)$(MANDIR)
 	install -m 644 man/blkcp.1 $(DESTDIR)$(MANDIR)/blkcp.1
-	ln -sf blkcp.1 $(DESTDIR)$(MANDIR)/dd.1
 	@echo "=== Installation erfolgreich in $(DESTDIR)$(BINDIR) abgeschlossen ==="
 
 .PHONY: all release clean test benchmark man tui install

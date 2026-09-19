@@ -2,7 +2,5 @@
 *.d
 blkcp
 blkcp-tui
-dd
-dd-tui
 bin/
 

@@ -3,14 +3,11 @@
 set -euo pipefail
 export LC_ALL=C
 
-LOCAL_DD="./blkcp"
-if [[ ! -x "$LOCAL_DD" && -x "./dd" ]]; then
-  LOCAL_DD="./dd"
-fi
+LOCAL_BLKCP="./blkcp"
 SYSTEM_DD="/usr/bin/dd"
 
-if [[ ! -x "$LOCAL_DD" ]]; then
-  echo "Error: Local binary '$LOCAL_DD' not found. Run 'make all' first." >&2
+if [[ ! -x "$LOCAL_BLKCP" ]]; then
+  echo "Error: Local binary '$LOCAL_BLKCP' not found. Run 'make release' first." >&2
   exit 1
 fi
 
@@ -25,7 +22,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 echo "======================================================================"
 echo "         Performance Benchmark: blkcp vs. System dd                   "
 echo "======================================================================"
-echo "Local Binary:  $LOCAL_DD ($(ls -lh "$LOCAL_DD" | awk '{print $5}'))"
+echo "Local Binary:  $LOCAL_BLKCP ($(ls -lh "$LOCAL_BLKCP" | awk '{print $5}'))"
 echo "System Binary: $SYSTEM_DD ($(ls -lh "$SYSTEM_DD" | awk '{print $5}'))"
 echo "Date:          $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Host:          $(uname -sr) on $(uname -m)"
@@ -90,7 +87,7 @@ run_test() {
   for i in {1..3}; do
     local s_speed l_speed
     s_speed=$(measure_speed "$SYSTEM_DD" "${args[@]}")
-    l_speed=$(measure_speed "$LOCAL_DD" "${args[@]}")
+    l_speed=$(measure_speed "$LOCAL_BLKCP" "${args[@]}")
 
     sys_best=$(awk -v a="$sys_best" -v b="$s_speed" 'BEGIN { print (a > b ? a : b) }')
     loc_best=$(awk -v a="$loc_best" -v b="$l_speed" 'BEGIN { print (a > b ? a : b) }')
@@ -139,7 +136,7 @@ run_custom_test() {
   for i in {1..3}; do
     local s_speed l_speed
     s_speed=$(measure_speed "$SYSTEM_DD" "${sys_args[@]}")
-    l_speed=$(measure_speed "$LOCAL_DD" "${loc_args[@]}")
+    l_speed=$(measure_speed "$LOCAL_BLKCP" "${loc_args[@]}")
 
     sys_best=$(awk -v a="$sys_best" -v b="$s_speed" 'BEGIN { print (a > b ? a : b) }')
     loc_best=$(awk -v a="$loc_best" -v b="$l_speed" 'BEGIN { print (a > b ? a : b) }')

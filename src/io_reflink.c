@@ -78,7 +78,9 @@ reflink_driver_init (dd_context_t *ctx, void **state)
   reflink_driver_state_t *st = xmalloc (sizeof *st);
   st->total_byte_limit = -1;
 
-  if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
+  if (ctx->cfg.bytes_to_copy >= 0)
+    st->total_byte_limit = ctx->cfg.bytes_to_copy;
+  else if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
     st->total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
   else if (ctx->cfg.max_records != INTMAX_MAX || ctx->cfg.max_bytes != 0)
     st->total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;

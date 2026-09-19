@@ -82,6 +82,18 @@ Statt Puffergrößen wie `bs=4M` manuell raten zu müssen, kann `dd` die optimal
 ./dd if=input.bin of=output.bin opt=auto status=progress
 ```
 
+### Exakte Byteziel-Begrenzung (`bytes=`, `tocopy=`, `tc=`)
+Klassisches `dd` koppelt `count=` fest an die Eingangsblockgröße (`count * ibs`), was bei dynamischem Autotuning (`bs=auto`) oder großen Blockgrößen (`bs=1M`) die exakte Übertragung krummer Datenmengen (z. B. Partitions- oder Festplatten-Images) erschwerte. Mit dem neuen Operanden `bytes=` (oder kurz `tocopy=` bzw. `tc=`) wird der Transfer auf das exakte Byte genau begrenzt:
+
+```bash
+# Kopiert exakt 4.529.848 Bytes mit dynamischer Blockgrößen-Optimierung:
+./dd if=disk.img of=/dev/sdb bs=auto tc=4529848 status=progress
+
+# Auch mit großen Blockgrößen oder Einheiten-Suffixen (K, M, G, KiB, MiB):
+./dd if=/dev/urandom of=test.bin bs=1M tocopy=4529848
+./dd if=/dev/zero of=image.raw bs=4M bytes=2.5G
+```
+
 ### Target Safety Guard
 Schützt vor dem berüchtigten versehentlichen Zerstören des laufenden Betriebssystems durch Tippfehler bei `of=`:
 ```bash

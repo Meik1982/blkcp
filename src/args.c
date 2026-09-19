@@ -221,6 +221,7 @@ dd_init_default_config (dd_config_t *cfg)
   cfg->seek_bytes = 0;
   cfg->max_records = INTMAX_MAX;
   cfg->max_bytes = 0;
+  cfg->bytes_to_copy = -1;
   cfg->status_level = STATUS_DEFAULT;
 }
 
@@ -277,6 +278,10 @@ parse_numeric_operand (char const *name, char const *val, dd_config_t *cfg,
     {
       *count = n;
       *count_B = has_B;
+    }
+  else if (operand_is (name, "bytes") || operand_is (name, "tocopy") || operand_is (name, "tc"))
+    {
+      cfg->bytes_to_copy = n;
     }
   else
     {
@@ -401,14 +406,20 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
   else if (skip != 0)
     cfg->skip_records = skip;
 
-  if (count_B)
+  if (cfg->bytes_to_copy >= 0)
+    {
+      cfg->input_flags |= O_COUNT_BYTES;
+      cfg->max_records = cfg->bytes_to_copy / cfg->input_blocksize;
+      cfg->max_bytes = cfg->bytes_to_copy % cfg->input_blocksize;
+    }
+  else if (count_B)
     cfg->input_flags |= O_COUNT_BYTES;
-  if (cfg->input_flags & O_COUNT_BYTES && count != INTMAX_MAX)
+  if (!(cfg->bytes_to_copy >= 0) && (cfg->input_flags & O_COUNT_BYTES) && count != INTMAX_MAX)
     {
       cfg->max_records = count / cfg->input_blocksize;
       cfg->max_bytes = count % cfg->input_blocksize;
     }
-  else if (count != INTMAX_MAX)
+  else if (!(cfg->bytes_to_copy >= 0) && count != INTMAX_MAX)
     cfg->max_records = count;
 
   if (seek_B)

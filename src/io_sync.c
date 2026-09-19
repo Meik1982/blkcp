@@ -169,7 +169,9 @@ sync_driver_init (dd_context_t *ctx, void **state)
   st->at.active = !!(ctx->cfg.conversions_mask & C_AUTOTUNE);
   st->at.total_byte_limit = -1;
 
-  if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
+  if (ctx->cfg.bytes_to_copy >= 0)
+    st->at.total_byte_limit = ctx->cfg.bytes_to_copy;
+  else if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
     st->at.total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
 
   if (st->at.active)
@@ -220,6 +222,18 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
   idx_t to_read = ctx->cfg.input_blocksize;
   if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records)
     to_read = ctx->cfg.max_bytes;
+
+  if (st->at.total_byte_limit >= 0)
+    {
+      intmax_t remaining = st->at.total_byte_limit - ctx->stats.w_bytes;
+      if (remaining <= 0)
+        {
+          *eof = true;
+          return EXIT_SUCCESS;
+        }
+      if (remaining < to_read)
+        to_read = (idx_t) remaining;
+    }
 
   ssize_t nread = (ctx->iread_fnc ? ctx->iread_fnc : dd_iread)
                   (STDIN_FILENO, ctx->ibuf, to_read);

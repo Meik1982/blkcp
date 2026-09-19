@@ -56,6 +56,7 @@ Copy a file, converting and formatting according to the operands.\n\
   cbs=BYTES       convert BYTES bytes at a time\n\
   conv=CONVS      convert the file as per the comma separated symbol list\n\
   count=N         copy only N input blocks\n\
+  bytes=BYTES     copy exactly BYTES bytes (aliases: 'tocopy=BYTES', 'tc=BYTES')\n\
   ibs=BYTES       read up to BYTES bytes at a time (default: 512)\n\
   if=FILE         read from FILE instead of stdin\n\
   iflag=FLAGS     read as per the comma separated symbol list\n\

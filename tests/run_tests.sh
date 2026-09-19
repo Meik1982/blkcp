@@ -149,4 +149,19 @@ CHUNK_SIZE=$(stat -c %s "$TMP_DIR/rand_reflink_chunk.bin")
 cmp -n 4194304 "$TMP_DIR/rand_reflink.bin" "$TMP_DIR/rand_reflink_chunk.bin"
 echo "Test 19 passed: Kernel Zero-Copy copy_file_range/reflink bit-exactness and count chunking"
 
-echo "=== All 19 extended tests passed successfully! ==="
+# Test 20: Arbitrary exact byte count targeting (bytes=N, tocopy=N, tc=N) across sync, auto, async
+head -c 5000000 /dev/urandom > "$TMP_DIR/rand_tc.bin"
+$DD_BIN if="$TMP_DIR/rand_tc.bin" of="$TMP_DIR/out_tc1.bin" bs=1048576 tc=4529848 status=none
+[[ $(stat -c %s "$TMP_DIR/out_tc1.bin") -eq 4529848 ]]
+cmp -n 4529848 "$TMP_DIR/rand_tc.bin" "$TMP_DIR/out_tc1.bin"
+
+$DD_BIN if="$TMP_DIR/rand_tc.bin" of="$TMP_DIR/out_tc2.bin" bs=auto tocopy=4529848 status=none
+[[ $(stat -c %s "$TMP_DIR/out_tc2.bin") -eq 4529848 ]]
+cmp -n 4529848 "$TMP_DIR/rand_tc.bin" "$TMP_DIR/out_tc2.bin"
+
+$DD_BIN if="$TMP_DIR/rand_tc.bin" of="$TMP_DIR/out_tc3.bin" opt=async bytes=4529848 status=none
+[[ $(stat -c %s "$TMP_DIR/out_tc3.bin") -eq 4529848 ]]
+cmp -n 4529848 "$TMP_DIR/rand_tc.bin" "$TMP_DIR/out_tc3.bin"
+echo "Test 20 passed: Arbitrary exact byte limit targeting (bytes=N, tocopy=N, tc=N) with bs=auto, large bs and async"
+
+echo "=== All 20 extended tests passed successfully! ==="

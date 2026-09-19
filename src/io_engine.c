@@ -621,7 +621,12 @@ dd_copy (dd_context_t *ctx)
         dd_check_signals (active_ctx);
 
       /* Global limit reached check */
-      if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records + !!ctx->cfg.max_bytes)
+      if (ctx->cfg.bytes_to_copy >= 0)
+        {
+          if (ctx->stats.w_bytes >= ctx->cfg.bytes_to_copy)
+            break;
+        }
+      else if (ctx->stats.r_partial + ctx->stats.r_full >= ctx->cfg.max_records + !!ctx->cfg.max_bytes)
         break;
 
       bool fallback = false;

@@ -24,6 +24,9 @@ Convert the file as per the comma separated symbol list.
 \fBcount\fR=\fI\,N\/\fR
 Copy only \fI\,N\/\fR input blocks.
 .TP
+\fBbytes\fR=\fI\,BYTES\/\fR, \fBtocopy\fR=\fI\,BYTES\/\fR, \fBtc\fR=\fI\,BYTES\/\fR
+Copy exactly \fI\,BYTES\/\fR bytes regardless of block size. Especially powerful when combined with \fBbs=auto\fR or large buffer sizes (e.g. \fBbs=1M tc=4529848\fR).
+.TP
 \fBibs\fR=\fI\,BYTES\/\fR
 Read up to \fI\,BYTES\/\fR bytes at a time (default: 512).
 .TP

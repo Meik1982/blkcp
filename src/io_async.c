@@ -68,6 +68,8 @@ typedef struct async_pipeline
 
   intmax_t r_records_limit;
   idx_t r_bytes_limit;
+  intmax_t r_records_done;
+  intmax_t total_bytes_read;
 } async_pipeline_t;
 
 /**
@@ -104,7 +106,7 @@ async_reader_worker (void *arg)
       pthread_mutex_unlock (&pipe->mutex);
 
       /* Respect max_records / max_bytes limits */
-      if (ctx->stats.r_full + ctx->stats.r_partial >= pipe->r_records_limit + !!pipe->r_bytes_limit)
+      if (pipe->r_records_done >= pipe->r_records_limit + !!pipe->r_bytes_limit)
         {
           slot->is_eof = true;
           slot->err = 0;
@@ -119,8 +121,28 @@ async_reader_worker (void *arg)
         }
 
       idx_t to_read = ctx->cfg.input_blocksize;
-      if (ctx->stats.r_full + ctx->stats.r_partial >= pipe->r_records_limit)
+      if (pipe->r_records_done >= pipe->r_records_limit)
         to_read = pipe->r_bytes_limit;
+
+      if (ctx->cfg.bytes_to_copy >= 0)
+        {
+          intmax_t remaining = ctx->cfg.bytes_to_copy - pipe->total_bytes_read;
+          if (remaining <= 0)
+            {
+              slot->is_eof = true;
+              slot->err = 0;
+              slot->nread = 0;
+
+              pthread_mutex_lock (&pipe->mutex);
+              pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+              pipe->count++;
+              pthread_cond_signal (&pipe->cond_not_empty);
+              pthread_mutex_unlock (&pipe->mutex);
+              break;
+            }
+          if (remaining < to_read)
+            to_read = (idx_t) remaining;
+        }
 
       ssize_t nread = (ctx->iread_fnc ? ctx->iread_fnc : dd_iread) (STDIN_FILENO, slot->buf, to_read);
 
@@ -129,6 +151,8 @@ async_reader_worker (void *arg)
           slot->nread = nread;
           slot->is_eof = false;
           slot->err = 0;
+          pipe->r_records_done++;
+          pipe->total_bytes_read += nread;
           dd_advance_input_offset (ctx, nread);
         }
       else if (nread == 0)

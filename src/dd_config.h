@@ -114,6 +114,7 @@ typedef struct dd_config
   intmax_t seek_bytes;            /**< Additional bytes to seek when oflag=seek_bytes */
   intmax_t max_records;           /**< Max records to copy (from count=N) */
   idx_t max_bytes;                /**< Remaining bytes to copy when iflag=count_bytes */
+  intmax_t bytes_to_copy;         /**< Exact byte count limit (bytes=N, tocopy=N, tc=N; -1 = unbounded) */
   int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
   int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
   int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */

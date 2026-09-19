@@ -21,15 +21,20 @@ Der ursprüngliche 2.563-Zeilen-Monolith `dd.c` wurde vollständig in getrennte 
 
 ```
 src/
-├── dd.c              # Schlanke Einstiegs- und Ablaufsteuerung (~165 Zeilen)
-├── dd_config.h       # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
-├── args.h / .c       # Operanden- & CLI-Parsing (if=, of=, bs=, Multiplikatoren, Validierung)
-├── io_engine.h / .c  # I/O-Pipeline, Autotuning, Zero-Memcpy Fast Path, Truncate & Sync
-├── conversions.h / .c# Zeichensatz- (EBCDIC/ASCII/Case) und Byte-Konvertierungen (swab)
-├── stats.h / .c      # Durchsatz-Telemetrie, Human-readable Formatierung & Records-Reporting
-├── signals.h / .c    # Async-Signal-Handler (SIGINT-Cleanup, SIGINFO/SIGUSR1-Reporting)
-├── system.h          # POSIX-Systemschnittstellen, gettext & vektorisierter Nullblock-Check
-└── version.c / .h    # Versionsidentifikation
+├── dd.c                   # Schlanke Einstiegs- und Ablaufsteuerung (~175 Zeilen)
+├── dd_config.h            # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
+├── args.h / .c            # Operanden- & CLI-Parsing (if=, of=, bs=, Multiplikatoren, Validierung)
+├── io_driver.h            # Einheitliches I/O-Treiber-Interface (Strategy Pattern / Inversion of Control)
+├── io_engine_internal.h   # Geteilte I/O-Primitive und Diagnose-Deklarationen
+├── io_engine.h / .c       # Zentrale Stream-Orchestrierung, Skip/Seek, Safety Guard & Transfer-Loop
+├── io_sync.c              # Synchroner Block-I/O Treiber mit dynamischem Autotuning (bs=auto)
+├── io_async.c             # Multi-Threaded Double-Buffering Ringpuffer Pipeline (opt=async)
+├── io_reflink.c           # Linux Kernel-Space Zero-Copy Reflink Treiber (copy_file_range(2))
+├── conversions.h / .c     # Zeichensatz- (EBCDIC/ASCII/Case) und Byte-Konvertierungen (swab)
+├── stats.h / .c           # Durchsatz-Telemetrie, Human-readable Formatierung & Live-Fortschritt (\r)
+├── signals.h / .c         # Async-Signal-Handler (SIGINT-Cleanup, SIGINFO/SIGUSR1-Reporting)
+├── system.h               # POSIX-Systemschnittstellen, gettext & vektorisierter Nullblock-Check
+└── version.c / .h         # Versionsidentifikation
 ```
 
 ---

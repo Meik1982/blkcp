@@ -6,7 +6,7 @@ LIBS ?= lib/libcoreutils.a -lcrypto -lpthread
 TARGET = dd
 TARGET_TUI = dd-tui
 
-SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c src/io_engine.c
+SRCS = src/dd.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c src/io_engine.c src/io_sync.c src/io_async.c src/io_reflink.c
 OBJS = $(SRCS:.c=.o)
 DEPS = $(OBJS:.o=.d)
 

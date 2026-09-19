@@ -304,7 +304,7 @@ main(void)
         case 10:
         case KEY_ENTER:
             if (form.active_field == FIELD_IF) {
-                edit_text_modal("Input-Pfad (if=) oder Pipe eingeben:", form.if_path, sizeof form.if_path);
+                edit_text_modal("Input-Pfad (-i) oder Pipe eingeben:", form.if_path, sizeof form.if_path);
                 if (form.if_path[0] == '|') form.if_is_pipe = true;
             } else if (form.active_field == FIELD_IF_SEARCH_FILE) {
                 if (tui_pick_file(form.if_path[0] ? form.if_path : NULL, form.if_path, sizeof form.if_path) == 0)
@@ -316,7 +316,7 @@ main(void)
                 if (tui_pick_pipe(true, form.if_path, sizeof form.if_path) == 0)
                     form.if_is_pipe = true;
             } else if (form.active_field == FIELD_OF) {
-                edit_text_modal("Output-Pfad (of=) oder Pipe eingeben:", form.of_path, sizeof form.of_path);
+                edit_text_modal("Output-Pfad (-o) oder Pipe eingeben:", form.of_path, sizeof form.of_path);
                 if (form.of_path[0] == '|') form.of_is_pipe = true;
             } else if (form.active_field == FIELD_OF_SEARCH_FILE) {
                 if (tui_pick_file(form.of_path[0] ? form.of_path : NULL, form.of_path, sizeof form.of_path) == 0)
@@ -328,13 +328,13 @@ main(void)
                 if (tui_pick_pipe(false, form.of_path, sizeof form.of_path) == 0)
                     form.of_is_pipe = true;
             } else if (form.active_field == FIELD_BS)
-                edit_text_modal("Block Size (bs=, z.B. auto, 1M, 64k):", form.bs, sizeof form.bs);
+                edit_text_modal("Block Size (-b, z.B. auto, 1M, 64k):", form.bs, sizeof form.bs);
             else if (form.active_field == FIELD_COUNT)
-                edit_text_modal("Count (Anzahl Bloecke oder Bytes):", form.count, sizeof form.count);
+                edit_text_modal("Count (-c, Anzahl Bloecke):", form.count, sizeof form.count);
             else if (form.active_field == FIELD_SKIP)
-                edit_text_modal("Skip Bloecke:", form.skip, sizeof form.skip);
+                edit_text_modal("Skip Offset (--skip, z.B. 10M, 512):", form.skip, sizeof form.skip);
             else if (form.active_field == FIELD_SEEK)
-                edit_text_modal("Seek Bloecke:", form.seek, sizeof form.seek);
+                edit_text_modal("Seek Offset (--seek, z.B. 10M, 512):", form.seek, sizeof form.seek);
             else if (form.active_field == FIELD_CONV)
                 edit_text_modal("conv= (z.B. noerror,sync,ucase):", form.conv, sizeof form.conv);
             else if (form.active_field == FIELD_IFLAG)

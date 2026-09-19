@@ -168,4 +168,46 @@ $BLKCP_BIN if="$TMP_DIR/rand_tc.bin" of="$TMP_DIR/out_tc3.bin" opt=async bytes=4
 cmp -n 4529848 "$TMP_DIR/rand_tc.bin" "$TMP_DIR/out_tc3.bin"
 echo "Test 20 passed: Arbitrary exact byte limit targeting (bytes=N, tocopy=N, tc=N) with bs=auto, large bs and async"
 
-echo "=== All 20 extended tests passed successfully! ==="
+# Test 21: Modern CLI syntax with io_uring engine (-i, -o, -b, -e uring, --hash)
+head -c 8388608 /dev/urandom > "$TMP_DIR/rand_uring.bin"
+EXPECTED_URING_SHA=$(sha256sum "$TMP_DIR/rand_uring.bin" | awk '{print $1}')
+$BLKCP_BIN -i "$TMP_DIR/rand_uring.bin" -o "$TMP_DIR/rand_uring_out.bin" -b 64K -e uring -q
+OUT_URING_SHA=$(sha256sum "$TMP_DIR/rand_uring_out.bin" | awk '{print $1}')
+[[ "$EXPECTED_URING_SHA" == "$OUT_URING_SHA" ]]
+[[ $(stat -c %s "$TMP_DIR/rand_uring_out.bin") -eq 8388608 ]]
+echo "Test 21 passed: Modern CLI syntax with io_uring engine (-i, -o, -b, -e uring, -q)"
+
+# Test 22: Modern CLI exact byte limit (-l / --limit) with io_uring
+$BLKCP_BIN -i "$TMP_DIR/rand_uring.bin" -o "$TMP_DIR/rand_uring_limit.bin" -b 128K -e uring -l 3141592 -q
+[[ $(stat -c %s "$TMP_DIR/rand_uring_limit.bin") -eq 3141592 ]]
+cmp -n 3141592 "$TMP_DIR/rand_uring.bin" "$TMP_DIR/rand_uring_limit.bin"
+echo "Test 22 passed: Modern CLI exact byte limit (-l 3141592) with io_uring engine"
+
+# Test 23: Modern CLI Autotuning and Hash flags (--autotune, --hash)
+$BLKCP_BIN -i "$TMP_DIR/rand_uring.bin" -o "$TMP_DIR/rand_auto_hash.bin" --autotune -e async --hash -q > "$TMP_DIR/hash_out.txt"
+[[ $(stat -c %s "$TMP_DIR/rand_auto_hash.bin") -eq 8388608 ]]
+cmp "$TMP_DIR/rand_uring.bin" "$TMP_DIR/rand_auto_hash.bin"
+echo "Test 23 passed: Modern CLI flags (--autotune, --hash, -e async)"
+
+# Test 24: Modern CLI positional arguments (blkcp INPUT OUTPUT -e uring)
+$BLKCP_BIN "$TMP_DIR/rand_uring.bin" "$TMP_DIR/rand_pos_out.bin" -e uring -b 256K -q
+[[ $(stat -c %s "$TMP_DIR/rand_pos_out.bin") -eq 8388608 ]]
+cmp "$TMP_DIR/rand_uring.bin" "$TMP_DIR/rand_pos_out.bin"
+echo "Test 24 passed: Modern CLI positional arguments (blkcp INPUT OUTPUT -e uring)"
+
+# Test 25: io_uring with input skip and output seek offsets
+head -c 2097152 /dev/urandom > "$TMP_DIR/rand_offset.bin"
+$BLKCP_BIN -i "$TMP_DIR/rand_offset.bin" -o "$TMP_DIR/rand_offset_out.bin" -b 64K -e uring --skip=65536 --seek=131072 -l 524288 -q
+[[ $(stat -c %s "$TMP_DIR/rand_offset_out.bin") -eq 655360 ]]
+/usr/bin/dd if="$TMP_DIR/rand_offset.bin" of="$TMP_DIR/expected_slice.bin" bs=65536 skip=1 count=8 status=none
+/usr/bin/dd if="$TMP_DIR/rand_offset_out.bin" of="$TMP_DIR/actual_slice.bin" bs=65536 skip=2 count=8 status=none
+cmp "$TMP_DIR/expected_slice.bin" "$TMP_DIR/actual_slice.bin"
+echo "Test 25 passed: io_uring engine with --skip and --seek offsets"
+
+# Test 26: io_uring streaming from pipe stdin
+$BLKCP_BIN -o "$TMP_DIR/rand_pipe_out.bin" -b 64K -e uring -q < "$TMP_DIR/rand_offset.bin"
+[[ $(stat -c %s "$TMP_DIR/rand_pipe_out.bin") -eq 2097152 ]]
+cmp "$TMP_DIR/rand_offset.bin" "$TMP_DIR/rand_pipe_out.bin"
+echo "Test 26 passed: io_uring streaming from stdin pipe"
+
+echo "=== All 26 extended tests passed successfully! ==="

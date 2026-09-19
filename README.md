@@ -1,6 +1,6 @@
 # blkcp (Block Copy: Next-Generation High-Performance Block Copy & Imaging Tool)
 
-Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch entflochtene Neuentwicklung auf Basis des klassischen Unix-/Linux-Tools `dd`. Vollständig abwärtskompatibel zu `dd`-Befehlszeilen, ergänzt um moderne In-Flight-Optimierer, Zero-Copy-Pfade, Mehrfaden-Double-Buffering und Sicherheitsfunktionen.
+Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch entflochtene Neuentwicklung zur modernen Stream- und Block-Replikation. Ausgestattet mit moderner POSIX/GNU-CLI, Linux `io_uring` Asynchronous Streaming, In-Flight Autotuning, Zero-Copy Reflink (`copy_file_range`), Multi-Threaded Double-Buffering und Hardware-Sicherheitsfunktionen.
 
 ---
 
@@ -18,174 +18,115 @@ Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch ent
 
 ## 2. Modulare Architektur
 
-Der ursprüngliche 2.563-Zeilen-Monolith `dd.c` wurde vollständig in getrennte Subsysteme zerlegt:
+Der historische Monolith wurde vollständig in getrennte, wartbare Subsysteme zerlegt:
 
 ```
 src/
-├── blkcp.c                 # Schlanke Einstiegs- und Ablaufsteuerung (~175 Zeilen)
+├── blkcp.c                 # Schlanke Einstiegs- und Ablaufsteuerung
 ├── blkcp_config.h          # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
-├── args.h / .c            # Operanden- & CLI-Parsing (if=, of=, bs=, tc=, Multiplikatoren, Validierung)
-├── io_driver.h            # Einheitliches I/O-Treiber-Interface (Strategy Pattern / Inversion of Control)
+├── args.h / .c            # Moderne CLI-Syntax (-i, -o, -b, -e, -l, -p, --hash) via getopt_long
+├── io_driver.h            # Einheitliches Backend-Treiber-Interface (Strategy Pattern / Inversion of Control)
 ├── io_engine_internal.h   # Geteilte I/O-Primitive und Diagnose-Deklarationen
 ├── io_engine.h / .c       # Zentrale Stream-Orchestrierung, Skip/Seek, Safety Guard & Transfer-Loop
-├── io_sync.c              # Synchroner Block-I/O Treiber mit dynamischem Autotuning (bs=auto)
-├── io_async.c             # Multi-Threaded Double-Buffering Ringpuffer Pipeline (opt=async)
+├── io_uring.c             # Linux io_uring Asynchronous I/O Treiber (Zero-Syscall Queue Pipeline)
+├── io_sync.c              # Synchroner Block-I/O Treiber mit dynamischem Autotuning (-b auto)
+├── io_async.c             # Multi-Threaded Double-Buffering Ringpuffer Pipeline (-e async)
 ├── io_reflink.c           # Linux Kernel-Space Zero-Copy Reflink Treiber (copy_file_range(2))
-├── conversions.h / .c     # Zeichensatz- (EBCDIC/ASCII/Case) und Byte-Konvertierungen (swab)
-├── stats.h / .c           # Durchsatz-Telemetrie, Human-readable Formatierung & Live-Fortschritt (\r)
-├── signals.h / .c         # Async-Signal-Handler (SIGINT-Cleanup, SIGINFO/SIGUSR1-Reporting)
+├── conversions.h / .c     # Zeichensatz- und Byte-Konvertierungen (SIMD-beschleunigt)
+├── stats.h / .c           # Durchsatz-Telemetrie, Human-readable Formatierung & Live-Fortschritt
+├── signals.h / .c         # Async-Signal-Handler (SIGINT-Cleanup, SIGUSR1-Reporting)
 ├── system.h               # POSIX-Systemschnittstellen, gettext & vektorisierter Nullblock-Check
 └── version.c / .h         # Versionsidentifikation
 ```
 
 ---
 
-## 3. Performance- & Durchsatz-Optimierungen
+## 3. Moderne CLI-Syntax & Beispiele
 
-Gegenüber dem GNU-Original wurden mehrere fundamentale I/O-Engpässe behoben:
+`blkcp` bricht mit den veralteten `key=value`-Operanden und bietet eine erstklassige, moderne Kommandozeilenschnittstelle:
 
-1. **Zero-Memcpy Fast Path (`copy_simple`):**
-   Wenn Blockgrößen aufeinander abgestimmt sind und keine Puffer-Transformation aktiv ist, wird der Zwischenpuffer (`obuf`) komplett umgangen und direkt aus dem Lesepuffer geschrieben.
-   * **Ergebnis:** Bei getrenntem `ibs=X obs=X` steigt der Durchsatz von **11,4 GB/s auf 20,2 GB/s (+77 %)**.
-2. **Single-Buffer-Konsolidierung:**
-   Wenn `ibs == obs`, allokiert `alloc_obuf()` keinen redundanten Zweitpuffer mehr (halbiert den RAM-Footprint).
-3. **SIMD-Vektorisierung für Case-Folding (`ucase`, `lcase`):**
-   Ersetzt byteweise indirekte Tabellen-Lookups durch branchless SIMD-Vektorinstruktionen (AVX2/SSE).
-   * **Ergebnis:** Der Konvertierungsdurchsatz stieg im Benchmark von **1,90 GB/s auf 8,60 GB/s (+352 %)**.
-4. **In-Flight Dynamic I/O Autotuning (`conv=autotune` / `bs=auto`):**
-   Ermittelt während des laufenden Kopiervorgangs autonom die optimale Blockgröße für das Quell-/Zielmedium.
-5. **Hardware-Awareness via `ioctl(BLKPBSZGET)`:**
-   Erkennt physische Sektorgrößen (z. B. 4Kn / Advanced Format) und optimale Stripe-Größen (`BLKIOOPT`) und richtet die minimale Autotune-Schranke automatisch daran aus.
-6. **Target Safety Guard (Schutz vor Überschreiben des Root-Dateisystems):**
-   Prüft via `/proc/mounts`, ob `of=` das aktive Root-, Boot- oder Home-Laufwerk adressiert. Verhindert katastrophale Fehleingaben („Disk Destroyer“), sofern nicht explizit `oflag=force`, `conv=force` oder `opt=force` angegeben wurde.
-7. **Vektorisierte Nullprüfung (`is_nul`):**
-   Verwendet `CCAN memeqzero` in Kombination mit glibc-vektorisiertem `memcmp`, wodurch `conv=sparse` um bis zu 26 % beschleunigt wird.
-8. **Zero-Overhead Signal-Polling:**
-   Inline-Branch-Prüfung (`__builtin_expect`) verhindert Funktionsaufrufe im Hot-Loop, wenn keine Signale anstehen.
-9. **Kernel-Readahead:**
-   Aktiviert `posix_fadvise(POSIX_FADV_SEQUENTIAL)` bei regulären Eingabedateien zur Maximierung des Page-Cache-Readaheads.
+### Schnelle Übersicht der Kernoptionen:
+* `-i, --input <FILE>`: Eingabedatei oder Blockgerät (Default: `stdin`)
+* `-o, --output <FILE>`: Ausgabedatei oder Blockgerät (Default: `stdout`)
+* `-b, --block-size <SIZE>`: Blockgröße (z. B. `64K`, `4M`, `1G`); `-b auto` aktiviert dynamisches Autotuning
+* `-e, --engine <NAME>`: Transfer-Engine: `uring` (Linux io_uring), `async` (Pthread-Ringpuffer), `reflink` (Kernel Zero-Copy), `sync` (synchron), `auto` (intelligente Auto-Erkennung)
+* `-l, --limit <SIZE>` (auch `-s, --size`): Exakte Byte-Begrenzung entkoppelt von Blockgrößen
+* `-c, --count <N>`: Anzahl der zu kopierenden Blöcke
+* `-p, --progress`: Echtzeit-Durchsatzanzeige und Fortschrittsbalken
+* `-q, --quiet`: Stiller Modus (nur fatale Fehlermeldungen)
+* `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
+* `--hash`, `--sha256`: Berechnet on-the-fly die Streaming-SHA-256-Prüfsumme
+* `--autotune`: Dynamisches Durchsatz-Autotuning
+* `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
+* `--skip <SIZE>`: Offset am Eingang überspringen
+* `--seek <SIZE>`: Offset am Ausgang vor dem Schreiben anspringen
+* `--sparse`: Nullblöcke als Sparse-Holes erzeugen
+
+### Anwendungsbeispiele:
+
+```bash
+# 1. Asynchrones NVMe/Festplatten-Cloning mit io_uring und Live-Fortschritt:
+blkcp -i /dev/nvme0n1 -o /dev/sdb -b 4M -e uring -p
+
+# 2. Exakte Image-Größe schreiben mit automatischer Streaming-SHA-256-Verifikation:
+blkcp -i image.raw -o /dev/sdc -l 10G -e uring --hash -p
+
+# 3. Großes VM-Image instantan duplizieren via Kernel Zero-Copy Reflink:
+blkcp -i ubuntu-vm.qcow2 -o ubuntu-vm-clone.qcow2 -e reflink -p
+
+# 4. Dynamisches Durchsatz-Autotuning (findet die ideale Puffergröße selbst):
+blkcp -i backup.iso -o /dev/sdd -b auto -p
+
+# 5. Intuitive Positional Syntax:
+blkcp source.bin destination.bin -e uring -p
+```
 
 ---
 
-## 4. Features: Autotuning & Safety Guard
+## 4. Kern-Features im Detail
 
-### In-Flight I/O Autotuning
-Statt Puffergrößen wie `bs=4M` manuell raten zu müssen, kann `dd` die optimale Blockgröße dynamisch während der ersten Millisekunden des Kopiervorgangs vermessen:
+### 1. Linux `io_uring` Asynchronous Engine (`-e uring`)
+Nutzt liburing für asynchrones, unterbrechungsfreies Double-Buffering direkt auf Kernel-Queue-Ebene. Minimiert Syscall-Overhead und Kontextwechsel für maximale Bus-Auslastung auf modernen NVMe-SSDs.
 
+### 2. Multi-Threaded Double-Buffering Ringpuffer (`-e async`)
+Entkoppelt Lesestrom und Schreibstrom über einen speichereffizienten POSIX-Ringpuffer. Verhindert, dass langsame Ausgabemedien (z. B. USB-Sticks) den Lesevorgang blockieren.
+
+### 3. In-Kernel Zero-Copy & CoW Reflink-Cloning (`-e reflink`)
+Nutzt unter Linux `copy_file_range(2)`:
+* **Instantanes Klonen:** Auf CoW-Dateisystemen (Btrfs, XFS, ZFS) werden Abbilder in Millisekunden ohne zusätzlichen Speicherplatzbedarf erzeugt.
+* **In-Kernel Zero-Copy:** Bei herkömmlichen Dateisystemen entfällt der Userspace-Pufferaufwand vollständig.
+
+### 4. Target Safety Guard
+Verhindert das versehentliche Zerstören laufender Betriebssystem-Installationen durch Tippfehler:
 ```bash
-# Aufruf über conv-Symbol:
-./dd if=/dev/nvme0n1 of=/dev/null conv=autotune status=progress
-
-# Oder als bs-Alias:
-./dd if=large_image.iso of=/dev/sdb bs=auto status=progress
-
-# Oder als opt-Operand:
-./dd if=input.bin of=output.bin opt=auto status=progress
+$ blkcp -i image.iso -o /dev/nvme0n1p2
+blkcp: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mounted system path '/'.
+Use '-f' or '--force' to override if intentional.
 ```
 
-### Exakte Byteziel-Begrenzung (`bytes=`, `tocopy=`, `tc=`)
-Klassisches `dd` koppelt `count=` fest an die Eingangsblockgröße (`count * ibs`), was bei dynamischem Autotuning (`bs=auto`) oder großen Blockgrößen (`bs=1M`) die exakte Übertragung krummer Datenmengen (z. B. Partitions- oder Festplatten-Images) erschwerte. Mit dem neuen Operanden `bytes=` (oder kurz `tocopy=` bzw. `tc=`) wird der Transfer auf das exakte Byte genau begrenzt:
-
-```bash
-# Kopiert exakt 4.529.848 Bytes mit dynamischer Blockgrößen-Optimierung:
-./dd if=disk.img of=/dev/sdb bs=auto tc=4529848 status=progress
-
-# Auch mit großen Blockgrößen oder Einheiten-Suffixen (K, M, G, KiB, MiB):
-./dd if=/dev/urandom of=test.bin bs=1M tocopy=4529848
-./dd if=/dev/zero of=image.raw bs=4M bytes=2.5G
-```
-
-### Target Safety Guard
-Schützt vor dem berüchtigten versehentlichen Zerstören des laufenden Betriebssystems durch Tippfehler bei `of=`:
-```bash
-# Schutz triggert automatisch bei gemounteten System-Partitionen:
-$ ./dd if=/dev/zero of=/dev/nvme0n1p2 count=1
-dd: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mounted system path '/'.
-Use 'oflag=force' or 'opt=force' to override if intentional.
-
-# Gezielt erzwingen (z. B. im Rescue-System):
-$ ./dd if=image.raw of=/dev/nvme0n1p2 oflag=force
-```
-
-### On-the-Fly Streaming SHA-256 Checksumme (`conv=sha256` / `opt=hash`)
-Berechnet die kryptografische Prüfsumme direkt parallel zum Schreiben. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs beim Schreiben von Boot-Images oder Backups:
-```bash
-# ISO auf Stick schreiben mit sofortiger Prüfsummen-Verifikation:
-$ ./dd if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
-4027+0 records in
-4027+0 records out
-1073741824 bytes (1,1 GB, 1,0 GiB) copied, 0,048 s, 22,3 GB/s
-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-```
-
-### Multi-Threaded Async Double-Buffering Pipeline (`opt=async` / `conv=async` / `oflag=async`)
-Entkoppelt den Lesestrom (`reader_thread`) vom Schreibstrom (`writer_thread`) über einen speichereffizienten POSIX-Ringpuffer (8 Slots). Verhindert, dass langsame Ausgabemedien (z. B. USB-Sticks mit hohen Schreiblatenzen) den Lesevorgang blockieren:
-```bash
-# Schneller NVMe-zu-USB Transfer mit asynchroner Pufferung und Streaming-Hash:
-$ ./dd if=large_os.iso of=/dev/sdb bs=1M opt=async,hash status=progress
-```
-
-### In-Kernel Zero-Copy & CoW Reflink-Cloning (`conv=reflink` / `opt=reflink`)
-Nutzt unter Linux den Syscall `copy_file_range(2)`, wenn Ein- und Ausgabedatei reguläre Dateien sind und keine modifizierenden Konvertierungen aktiv sind:
-* **Instantanes Klonen auf CoW-Dateisystemen:** Auf Btrfs, XFS und ZFS werden Dateikopien und Disk-Images ohne physische Schreiblast als Copy-on-Write Reflinks in Millisekunden erzeugt.
-* **In-Kernel Zero-Copy:** Bei herkömmlichen Dateisystemen entfällt der Userspace-Kopieraufwand komplett, da der Datentransfer direkt auf VFS-/Page-Cache-Ebene abläuft.
-* **Transparenter Fallback:** Kann das Dateisystem keine Reflinks (z. B. bei Partitionsgrenzen), fällt `dd` nahtlos auf die Standard-Pufferung zurück.
-```bash
-# Großes VM-Image via Reflink instantan duplizieren:
-$ ./dd if=ubuntu-vm.qcow2 of=ubuntu-vm-clone.qcow2 conv=reflink status=progress
-```
-
-### Interaktiver TUI-Manager (`dd-tui`)
-Komfortabler, maus- und tastaturgesteuerter Terminal-Assistent auf Basis von `ncursesw`:
-* **Block-Device Erkennung:** Erkennt USB-Sticks und Festplatten automatisch via `/sys/block`, zeigt Gerätemodelle und Größen an und markiert System-Laufwerke (`/`, `/boot`, `/home`) mit Schutzsperren.
-* **Integrierter Dateibrowser:** Komfortables Auswählen von `.iso`-, `.img`- und `.raw`-Dateien sowie Anlegen neuer Zieldateien direkt im aktiven Ordner mit der Taste `[N]`.
-* **Programm- & Pipe-Integration:** Volle Unterstützung von Unix-Pipes (`[Pipe]`-Button). Unterstützt direkte Stream-Ein-/Ausgabe (`stdin`/`stdout`), Dekompression/Kompression (`zstd`, `gzip`, `xz`), Remote-Transfers (`ssh`) und Web-Streams (`curl`).
-* **Befehlsgenerator & Clipboard:** Erzeugt die exakte CLI-Kommandozeile in Echtzeit und kopiert sie auf Knopfdruck in die X11-/Wayland-Zwischenablage.
-* **Sicherheits-Popup:** Erzwingt eine bewusste Bestätigung vor Schreibzugriffen auf physische Datenträger.
-```bash
-# Starten des TUI-Managers:
-./dd-tui
-# oder über das Makefile:
-make tui
-```
+### 5. On-the-Fly Streaming SHA-256 Checksumme (`--hash` / `--sha256`)
+Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
 
 ---
 
 ## 5. Bauen, Testen & Benchmarking
 
-### Kompilieren & Standard-Targets
 ```bash
-# Release-Build (erstellt sowohl 'dd' als auch 'dd-tui'):
-make clean all
+# Debug-/Entwicklungsbuild:
+make all
+
+# Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
+make release
+
+# Erweiterte Regressionstest-Suite (24 Tests):
+make test
+
+# Vergleichende Performance-Benchmarks:
+make benchmark
+
+# Manpage einsehen:
+make man
 
 # Interaktiven TUI-Manager starten:
 make tui
-
-# Alle 17 Regressionstests ausführen:
-make test
-
-# Vergleichs-Benchmark gegen GNU dd ausführen:
-make benchmark
-
-# Manpage anzeigen:
-make man
 ```
-*Das Makefile unterstützt automatische Header-Dependency-Verfolgung (`-MMD -MP`).*
-
-### Offizielle UNIX-Manpage
-Die vollständige Spezifikation aller Schalter, Flags, Conversions und Sicherheitsmechanismen liegt unter `man/dd.1`:
-```bash
-man -l man/dd.1
-```
-
-### Regressionstest-Suite (17 Tests)
-```bash
-./tests/run_tests.sh
-```
-Prüft Pipelines, Blockgrößen, Skips, Seeks, EBCDIC/ASCII, Case-Folding, Swab, Sparse-Dateien, `conv=sync`, `conv=block/unblock`, `iflag=count_bytes`, Stille (`status=none`), Bit-Exaktheit von `conv=autotune`/`bs=auto`, den Target Safety Guard, On-the-Fly SHA-256 Checksums sowie die Multi-Threaded Async Double-Buffering Pipeline.
-
-### Vergleichs-Benchmark (Lokal vs. System `/usr/bin/dd`)
-```bash
-./tests/benchmark_compare.sh
-```
-Misst Durchsatzwerte in 7 Szenarien und gibt eine direkte Gegenüberstellung mit prozentualer Differenz aus.

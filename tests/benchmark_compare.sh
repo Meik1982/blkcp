@@ -200,5 +200,11 @@ run_custom_test "12. In-Flight SHA256 (conv=sha256)" \
   VS \
   if=/dev/zero of=/dev/null bs=64k count=30000 conv=sha256 status=progress
 
+# Test 13: io_uring Asynchronous Kernel Engine (-e uring vs standard sync)
+run_custom_test "13. io_uring Engine (-e uring)" \
+  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_uring.bin" bs=1M status=progress \
+  VS \
+  -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_uring.bin" -b 1M -e uring -p
+
 echo "======================================================================"
 echo "Benchmark completed successfully."

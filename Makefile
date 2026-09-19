@@ -1,12 +1,12 @@
 CC ?= gcc
 CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
 LDFLAGS ?= 
-LIBS ?= lib/libcoreutils.a -lcrypto -lpthread
+LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring
 
 TARGET = blkcp
 TARGET_TUI = blkcp-tui
 
-SRCS = src/blkcp.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c src/io_engine.c src/io_sync.c src/io_async.c src/io_reflink.c
+SRCS = src/blkcp.c src/version.c src/conversions.c src/stats.c src/signals.c src/args.c src/io_engine.c src/io_sync.c src/io_async.c src/io_reflink.c src/io_uring.c
 OBJS = $(SRCS:.c=.o)
 DEPS = $(OBJS:.o=.d)
 

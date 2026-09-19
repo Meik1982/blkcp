@@ -1,213 +1,119 @@
 .TH BLKCP 1 "September 2026" "blkcp (High-Performance Block Copy Utility)" "User Commands"
 .SH NAME
-blkcp \- high-performance block copy utility with dynamic autotuning, zero-copy, streaming hash and safety guards
+blkcp \- high-performance block copy utility with dynamic autotuning, io_uring, zero-copy reflink, streaming hash and safety guards
 .SH SYNOPSIS
 .B blkcp
-[\fI\,OPERAND\/\fR]...
+[\fI\,OPTIONS\/\fR] [\fI\,INPUT\/\fR] [\fI\,OUTPUT\/\fR]
 .br
 .B blkcp
-\fI\,OPTION\/\fR
+\fB-i\fR \fI\,INPUT\/\fR \fB-o\fR \fI\,OUTPUT\/\fR [\fI\,OPTIONS\/\fR]
 .SH DESCRIPTION
-Copy and convert files and block devices according to operands (modern high-performance replacement for dd).
+\fBblkcp\fR is a modern, ultra-high-performance block replication and stream imaging tool designed from the ground up to replace traditional dd.
 .PP
-Unlike traditional implementations, this modular and optimized edition provides dynamic in-flight I/O autotuning, zero-copy fast paths, SIMD-accelerated transformations, hardware block-size awareness, streaming SHA-256 integrity verification, and target safety guardrails against accidental host system destruction.
+Key capabilities include asynchronous \fBio_uring\fR kernel streaming, multi-threaded ringbuffer double-buffering, Linux kernel zero-copy reflink cloning via \fBcopy_file_range(2)\fR, real-time dynamic I/O autotuning, hardware block-size awareness, streaming cryptographic SHA-256 integrity verification, and an active Target Safety Guard preventing catastrophic accidental host filesystem destruction.
+
+.SH CORE OPTIONS
 .TP
-\fBbs\fR=\fI\,BYTES\/\fR
-Read and write up to \fI\,BYTES\/\fR bytes at a time (default: 512). Overrides \fBibs\fR and \fBobs\fR. If set to \fBauto\fR (\fBbs=auto\fR), the engine autonomously benchmarks and tunes the optimal block size during the first milliseconds of transfer.
+\fB\-i\fR, \fB\-\-input\fR=\fI\,FILE\/\fR
+Specify the input file, block device or stream (default: standard input).
 .TP
-\fBcbs\fR=\fI\,BYTES\/\fR
-Convert \fI\,BYTES\/\fR bytes at a time.
+\fB\-o\fR, \fB\-\-output\fR=\fI\,FILE\/\fR
+Specify the output destination file, block device or stream (default: standard output).
 .TP
-\fBconv\fR=\fI\,CONVS\/\fR
-Convert the file as per the comma separated symbol list.
+\fB\-b\fR, \fB\-\-block\-size\fR=\fI\,SIZE\/\fR
+Uniform block transfer size (e.g. \fB64K\fR, \fB1M\fR, \fB4M\fR, \fB16M\fR). Passing \fBauto\fR enables dynamic in-flight autotuning.
 .TP
-\fBcount\fR=\fI\,N\/\fR
-Copy only \fI\,N\/\fR input blocks.
+\fB\-e\fR, \fB\-\-engine\fR=\fI\,ENGINE\/\fR
+Select the low-level data transfer execution engine:
+.RS
+.IP \(bu 2
+\fBuring\fR: Linux \fBio_uring\fR kernel submission/completion ring pipeline. Delivers maximum async throughput with minimal syscall overhead.
+.IP \(bu 2
+\fBasync\fR: Multi-threaded pthread double-buffering pipeline with isolated background reader/writer ringbuffers.
+.IP \(bu 2
+\fBreflink\fR: Zero-copy in-kernel cloning via \fBcopy_file_range(2)\fR (instantaneous on CoW filesystems like Btrfs/XFS/ZFS).
+.IP \(bu 2
+\fBsync\fR: Direct synchronous block I/O with optional dynamic autotuning.
+.IP \(bu 2
+\fBauto\fR: Intelligent auto-detection (opportunistic reflink -> io_uring/async -> sync).
+.RE
 .TP
-\fBbytes\fR=\fI\,BYTES\/\fR, \fBtocopy\fR=\fI\,BYTES\/\fR, \fBtc\fR=\fI\,BYTES\/\fR
-Copy exactly \fI\,BYTES\/\fR bytes regardless of block size. Especially powerful when combined with \fBbs=auto\fR or large buffer sizes (e.g. \fBbs=1M tc=4529848\fR).
+\fB\-l\fR, \fB\-s\fR, \fB\-\-limit\fR=\fI\,BYTES\/\fR, \fB\-\-size\fR=\fI\,BYTES\/\fR
+Exact transfer byte limit regardless of block alignment.
 .TP
-\fBibs\fR=\fI\,BYTES\/\fR
-Read up to \fI\,BYTES\/\fR bytes at a time (default: 512).
+\fB\-c\fR, \fB\-\-count\fR=\fI\,N\/\fR
+Copy only \fIN\fR input blocks.
 .TP
-\fBif\fR=\fI\,FILE\/\fR
-Read from \fI\,FILE\/\fR instead of standard input.
+\fB\-p\fR, \fB\-\-progress\fR
+Display live real-time transfer telemetry and transfer speeds on stderr.
 .TP
-\fBiflag\fR=\fI\,FLAGS\/\fR
-Read as per the comma separated symbol list.
+\fB\-q\fR, \fB\-\-quiet\fR
+Suppress all output except fatal error messages.
 .TP
-\fBobs\fR=\fI\,BYTES\/\fR
-Write \fI\,BYTES\/\fR bytes at a time (default: 512).
+\fB\-f\fR, \fB\-\-force\fR
+Override the Target Safety Guard when attempting to write to devices hosting mounted root/boot partitions.
 .TP
-\fBof\fR=\fI\,FILE\/\fR
-Write to \fI\,FILE\/\fR instead of standard output.
+\fB\-\-hash\fR, \fB\-\-sha256\fR
+Compute on-the-fly streaming SHA-256 cryptographic digest without requiring an extra I/O pass.
 .TP
-\fBoflag\fR=\fI\,FLAGS\/\fR
-Write as per the comma separated symbol list.
+\fB\-\-autotune\fR
+Benchmark and dynamically scale the block size during the initial transfer phase for peak bus throughput.
 .TP
-\fBopt\fR=\fI\,FEATURE\/\fR
-Modern optimizer feature switch (\fBauto\fR, \fBforce\fR, \fBsha256\fR, \fBasync\fR, \fBreflink\fR). Can be comma-separated (e.g. \fBopt=async,hash\fR).
+\fB\-\-direct\fR
+Enable direct I/O (\fBO_DIRECT\fR) bypassing the kernel page cache.
 .TP
-\fBseek\fR=\fI\,N\/\fR
-(or \fBoseek\fR=\fI\,N\/\fR) Skip \fI\,N\/\fR \fBobs\fR-sized output blocks.
+\fB\-\-skip\fR=\fI\,BYTES\/\fR
+Skip \fIBYTES\fR at input before copying.
 .TP
-\fBskip\fR=\fI\,N\/\fR
-(or \fBiseek\fR=\fI\,N\/\fR) Skip \fI\,N\/\fR \fBibs\fR-sized input blocks.
+\fB\-\-seek\fR=\fI\,BYTES\/\fR
+Seek \fIBYTES\fR at output before writing.
 .TP
-\fBstatus\fR=\fI\,LEVEL\/\fR
-The LEVEL of information to print to stderr:
-\fBnone\fR suppresses everything but error messages;
-\fBnoxfer\fR suppresses the final transfer statistics;
-\fBprogress\fR shows periodic periodic transfer statistics.
-.SH CONVERSION SYMBOLS
+\fB\-\-sparse\fR
+Punch holes or create sparse files for zero-filled blocks.
 .TP
-\fBascii\fR
-Convert EBCDIC to ASCII.
+\fB\-\-sync\fR
+Pad short reads with zero bytes up to block size.
 .TP
-\fBebcdic\fR
-Convert ASCII to EBCDIC.
+\fB\-\-notrunc\fR
+Do not truncate the target output file.
 .TP
-\fBibm\fR
-Convert ASCII to alternate EBCDIC.
+\fB\-\-noerror\fR
+Continue copying across bad sectors or read errors.
 .TP
-\fBblock\fR
-Pad newline-terminated records with spaces to \fBcbs\fR-size.
+\fB\-\-fdatasync\fR
+Synchronously flush output data before exiting.
 .TP
-\fBunblock\fR
-Replace trailing spaces in \fBcbs\fR-size records with newline.
+\fB\-\-fsync\fR
+Synchronously flush output data and metadata before exiting.
 .TP
-\fBlcase\fR
-Change upper case to lower case (SIMD-accelerated on ASCII streams).
+\fB\-h\fR, \fB\-\-help\fR
+Display comprehensive help manual and exit.
 .TP
-\fBucase\fR
-Change lower case to upper case (SIMD-accelerated on ASCII streams).
-.TP
-\fBsparse\fR
-Try to seek rather than write the output for NUL input blocks (vector-optimized).
-.TP
-\fBautotune\fR
-Dynamically benchmark and select optimal block size while copying.
-.TP
-\fBsha256\fR, \fBhash\fR
-Compute and print streaming SHA-256 digest on-the-fly without an extra I/O pass.
-.TP
-\fBforce\fR
-Override target safety guard when writing to devices containing mounted system roots.
-.TP
-\fBasync\fR
-Enable multi-threaded reader/writer double-buffering pipeline (asynchronous Ringbuffer).
-.TP
-\fBreflink\fR, \fBcfr\fR, \fBzero-copy\fR
-Use Linux kernel zero-copy copy_file_range(2) for instantaneous CoW cloning and reduced context switching.
-.TP
-\fBswab\fR
-Swap every pair of input bytes.
-.TP
-\fBsync\fR
-Pad every input block with NULs to \fBibs\fR-size.
-.TP
-\fBexcl\fR
-Fail if the output file already exists.
-.TP
-\fBnocreat\fR
-Do not create the output file.
-.TP
-\fBnotrunc\fR
-Do not truncate the output file.
-.TP
-\fBnoerror\fR
-Continue after read errors.
-.TP
-\fBfdatasync\fR
-Physically write output file data before finishing.
-.TP
-\fBfsync\fR
-Likewise, but also write metadata.
-.SH FLAG SYMBOLS
-.TP
-\fBappend\fR
-Append mode (makes sense only for output; \fBconv=notrunc\fR suggested).
-.TP
-\fBdirect\fR
-Use direct I/O for data, bypassing the OS page cache.
-.TP
-\fBdirectory\fR
-Fail unless a directory.
-.TP
-\fBdsync\fR
-Use synchronized I/O for data.
-.TP
-\fBsync\fR
-Likewise, but also for metadata.
-.TP
-\fBnonblock\fR
-Use non-blocking I/O.
-.TP
-\fBnoatime\fR
-Do not update access time.
-.TP
-\fBnocache\fR
-Request to discard cache.
-.TP
-\fBnoctty\fR
-Do not assign controlling terminal from file.
-.TP
-\fBnofollow\fR
-Do not follow symlinks.
-.TP
-\fBcount_bytes\fR
-Treat 'count=N' as a byte count (iflag only).
-.TP
-\fBskip_bytes\fR
-Treat 'skip=N' as a byte count (iflag only).
-.TP
-\fBseek_bytes\fR
-Treat 'seek=N' as a byte count (oflag only).
-.TP
-\fBforce\fR
-Override target safety guard check against overwriting mounted system roots.
-.TP
-\fBasync\fR
-Enable multi-threaded reader/writer double-buffering pipeline.
+\fB\-v\fR, \fB\-\-version\fR
+Display version information and exit.
+
 .SH TARGET SAFETY GUARD
-When writing to raw block devices (\fBS_ISBLK\fR), \fBdd\fR cross-references the device number against active mounts in \fB/proc/mounts\fR. If the destination targets the host root (\fB/\fR), \fB/boot\fR, or \fB/home\fR filesystems, execution is aborted immediately to prevent fatal data loss ("Disk Destroyer syndrome").
-To bypass this protection in emergency/rescue situations, supply \fBoflag=force\fR, \fBconv=force\fR, or \fBopt=force\fR.
+\fBblkcp\fR inspects target block devices prior to opening. If the target device holds an active system mount (e.g. \fB/\fR, \fB/boot\fR, \fB/usr\fR, \fB/home\fR), write execution is immediately refused unless \fB-f\fR or \fB--force\fR is explicitly supplied.
+
+.SH SIGNAL HANDLING
+Sending \fBSIGUSR1\fR to a running \fBblkcp\fR process causes it to output current I/O progress and speed statistics to standard error before resuming operation.
+
 .SH EXAMPLES
 .PP
-Flash a Linux OS image to a USB stick with dynamic throughput autotuning and immediate verification:
+Clone a raw disk image with io_uring and live progress telemetry:
 .RS
-.B blkcp if=archlinux.iso of=/dev/sdb bs=auto conv=sha256 status=progress
+.B blkcp -i /dev/nvme0n1 -o backup.raw -b 4M -e uring -p
 .RE
 .PP
-Instantaneous CoW reflink cloning of a large virtual disk image on Linux:
+Instantaneous zero-copy reflink duplicate:
 .RS
-.B blkcp if=ubuntu-vm.qcow2 of=ubuntu-vm-clone.qcow2 conv=reflink status=progress
+.B blkcp -i source.iso -o clone.iso -e reflink -p
 .RE
 .PP
-Decompress and write an OS image on-the-fly via standard Unix pipeline:
+Copy exact 10 GB limit with streaming SHA-256 verification:
 .RS
-.B zstd -dc archlinux.iso.zst | blkcp of=/dev/sdb bs=auto opt=async,hash status=progress
+.B blkcp -i /dev/urandom -o test.img -l 10G -e uring --hash
 .RE
-.PP
-Stream raw disk backup to remote storage over SSH with multi-threaded double-buffering:
-.RS
-.B blkcp if=/dev/nvme0n1 bs=auto opt=async,hash | ssh root@nas "cat > /backup/system.raw"
-.RE
-.PP
-Copy exact byte count targeting regardless of block size:
-.RS
-.B blkcp if=disk.img of=/dev/sdb bs=auto tc=4529848
-.RE
-.PP
-Create a 10 GB sparse file:
-.RS
-.B blkcp if=/dev/zero of=sparse.img bs=1M seek=10240 count=0
-.RE
-.SH SIGNALS
-Sending a \fBSIGUSR1\fR signal to a running \fBblkcp\fR process makes it print I/O statistics to standard error and resume copying.
+
 .SH AUTHORS
-Written by Paul Rubin, David MacKenzie, Stuart Kemp, and modularized/enhanced by Meik in 2026.
-.SH SEE ALSO
-.BR dd (1),
-.BR cp (1),
-.BR sha256sum (1)
+Meik and the blkcp engineering contributors.

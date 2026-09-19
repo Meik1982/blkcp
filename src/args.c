@@ -9,6 +9,8 @@
 
 #include "args.h"
 #include "system.h"
+#include "version.h"
+#include "version-etc.h"
 #include "error.h"
 #include "quote.h"
 #include "quotearg.h"
@@ -55,6 +57,8 @@ static struct symbol_value const conversions[] =
   {"cfr", C_REFLINK},
   {"zero-copy", C_REFLINK},
   {"zerocopy", C_REFLINK},
+  {"uring", C_URING},
+  {"io_uring", C_URING},
   {"", 0}
 };
 
@@ -301,6 +305,52 @@ parse_numeric_operand (char const *name, char const *val, dd_config_t *cfg,
     *converted_idx = n;
 }
 
+enum
+{
+  OPT_AUTOTUNE = 1000,
+  OPT_HASH,
+  OPT_DIRECT,
+  OPT_SPARSE,
+  OPT_SYNC,
+  OPT_SKIP,
+  OPT_SEEK,
+  OPT_FDATASYNC,
+  OPT_FSYNC,
+  OPT_NOERROR,
+  OPT_NOTRUNC
+};
+
+static struct option const modern_long_options[] =
+{
+  {"input", required_argument, NULL, 'i'},
+  {"output", required_argument, NULL, 'o'},
+  {"block-size", required_argument, NULL, 'b'},
+  {"bs", required_argument, NULL, 'b'},
+  {"limit", required_argument, NULL, 'l'},
+  {"size", required_argument, NULL, 'l'},
+  {"bytes", required_argument, NULL, 'l'},
+  {"count", required_argument, NULL, 'c'},
+  {"engine", required_argument, NULL, 'e'},
+  {"progress", no_argument, NULL, 'p'},
+  {"quiet", no_argument, NULL, 'q'},
+  {"force", no_argument, NULL, 'f'},
+  {"autotune", no_argument, NULL, OPT_AUTOTUNE},
+  {"hash", no_argument, NULL, OPT_HASH},
+  {"sha256", no_argument, NULL, OPT_HASH},
+  {"direct", no_argument, NULL, OPT_DIRECT},
+  {"sparse", no_argument, NULL, OPT_SPARSE},
+  {"sync", no_argument, NULL, OPT_SYNC},
+  {"skip", required_argument, NULL, OPT_SKIP},
+  {"seek", required_argument, NULL, OPT_SEEK},
+  {"fdatasync", no_argument, NULL, OPT_FDATASYNC},
+  {"fsync", no_argument, NULL, OPT_FSYNC},
+  {"noerror", no_argument, NULL, OPT_NOERROR},
+  {"notrunc", no_argument, NULL, OPT_NOTRUNC},
+  {"help", no_argument, NULL, 'h'},
+  {"version", no_argument, NULL, 'v'},
+  {NULL, 0, NULL, 0}
+};
+
 void
 dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_read, bool *use_fullblock)
 {
@@ -310,6 +360,152 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
   intmax_t seek = 0;
   bool count_B = false, skip_B = false, seek_B = false;
 
+  optind = 1;
+  int c;
+  while ((c = getopt_long (argc, (char **) argv, "i:o:b:e:l:s:c:pqfhv", modern_long_options, NULL)) != -1)
+    {
+      switch (c)
+        {
+        case 'i':
+          cfg->input_file = optarg;
+          break;
+        case 'o':
+          cfg->output_file = optarg;
+          break;
+        case 'b':
+          if (operand_matches (optarg, "auto", 0) || operand_matches (optarg, "autotune", 0))
+            {
+              cfg->conversions_mask |= C_AUTOTUNE;
+            }
+          else
+            {
+              strtol_error invalid = LONGINT_OK;
+              blocksize = parse_integer (optarg, &invalid);
+              if (invalid != LONGINT_OK || blocksize <= 0)
+                error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                       "%s: %s", _("invalid block size"), quoteaf (optarg));
+            }
+          break;
+        case 'e':
+          if (operand_matches (optarg, "uring", 0) || operand_matches (optarg, "io_uring", 0))
+            {
+              cfg->engine = ENGINE_URING;
+              cfg->conversions_mask |= C_URING;
+            }
+          else if (operand_matches (optarg, "async", 0) || operand_matches (optarg, "pipeline", 0))
+            {
+              cfg->engine = ENGINE_ASYNC;
+              cfg->conversions_mask |= C_ASYNC;
+            }
+          else if (operand_matches (optarg, "reflink", 0) || operand_matches (optarg, "cfr", 0)
+                   || operand_matches (optarg, "zero-copy", 0))
+            {
+              cfg->engine = ENGINE_REFLINK;
+              cfg->conversions_mask |= C_REFLINK;
+            }
+          else if (operand_matches (optarg, "sync", 0))
+            {
+              cfg->engine = ENGINE_SYNC;
+            }
+          else if (operand_matches (optarg, "auto", 0))
+            {
+              cfg->engine = ENGINE_AUTO;
+            }
+          else
+            {
+              error (EXIT_FAILURE, 0, _("unrecognized engine: %s (valid: sync, async, reflink, uring, auto)"), quoteaf (optarg));
+            }
+          break;
+        case 'l':
+        case 's':
+          {
+            strtol_error invalid = LONGINT_OK;
+            cfg->bytes_to_copy = parse_integer (optarg, &invalid);
+            if (invalid != LONGINT_OK || cfg->bytes_to_copy < 0)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s", _("invalid byte limit"), quoteaf (optarg));
+            cfg->input_flags |= O_COUNT_BYTES;
+          }
+          break;
+        case 'c':
+          {
+            strtol_error invalid = LONGINT_OK;
+            count = parse_integer (optarg, &invalid);
+            count_B = !!strchr (optarg, 'B');
+            if (invalid != LONGINT_OK || count < 0)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s", _("invalid count"), quoteaf (optarg));
+          }
+          break;
+        case 'p':
+          cfg->status_level = STATUS_PROGRESS;
+          break;
+        case 'q':
+          cfg->status_level = STATUS_NONE;
+          break;
+        case 'f':
+          cfg->output_flags |= O_FORCE;
+          break;
+        case OPT_AUTOTUNE:
+          cfg->conversions_mask |= C_AUTOTUNE;
+          break;
+        case OPT_HASH:
+          cfg->conversions_mask |= C_SHA256;
+          break;
+        case OPT_DIRECT:
+          cfg->input_flags |= O_DIRECT;
+          cfg->output_flags |= O_DIRECT;
+          break;
+        case OPT_SPARSE:
+          cfg->conversions_mask |= C_SPARSE;
+          break;
+        case OPT_SYNC:
+          cfg->conversions_mask |= C_SYNC;
+          break;
+        case OPT_SKIP:
+          {
+            strtol_error invalid = LONGINT_OK;
+            skip = parse_integer (optarg, &invalid);
+            skip_B = true;
+            if (invalid != LONGINT_OK || skip < 0)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s", _("invalid skip offset"), quoteaf (optarg));
+          }
+          break;
+        case OPT_SEEK:
+          {
+            strtol_error invalid = LONGINT_OK;
+            seek = parse_integer (optarg, &invalid);
+            seek_B = true;
+            if (invalid != LONGINT_OK || seek < 0)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s", _("invalid seek offset"), quoteaf (optarg));
+          }
+          break;
+        case OPT_FDATASYNC:
+          cfg->conversions_mask |= C_FDATASYNC;
+          break;
+        case OPT_FSYNC:
+          cfg->conversions_mask |= C_FSYNC;
+          break;
+        case OPT_NOERROR:
+          cfg->conversions_mask |= C_NOERROR;
+          break;
+        case OPT_NOTRUNC:
+          cfg->conversions_mask |= C_NOTRUNC;
+          break;
+        case 'h':
+          usage (EXIT_SUCCESS);
+          break;
+        case 'v':
+          version_etc (stdout, "blkcp", PACKAGE_NAME, Version, "Meik", (char *) NULL);
+          exit (EXIT_SUCCESS);
+          break;
+        default:
+          usage (EXIT_FAILURE);
+        }
+    }
+
   for (int i = optind; i < argc; i++)
     {
       char const *name = argv[i];
@@ -317,8 +513,17 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
 
       if (val == nullptr)
         {
-          error (0, 0, _("unrecognized operand %s"), quoteaf (name));
-          usage (EXIT_FAILURE);
+          /* Positional arguments: blkcp [INPUT] [OUTPUT] */
+          if (cfg->input_file == NULL)
+            cfg->input_file = name;
+          else if (cfg->output_file == NULL)
+            cfg->output_file = name;
+          else
+            {
+              error (0, 0, _("unrecognized operand %s"), quoteaf (name));
+              usage (EXIT_FAILURE);
+            }
+          continue;
         }
       val++;
 
@@ -355,6 +560,12 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
               else if (operand_matches (tok, "reflink", 0) || operand_matches (tok, "cfr", 0)
                        || operand_matches (tok, "zero-copy", 0) || operand_matches (tok, "zerocopy", 0))
                 cfg->conversions_mask |= C_REFLINK;
+              else if (operand_matches (tok, "uring", 0) || operand_matches (tok, "io_uring", 0)
+                       || operand_matches (tok, "io-uring", 0))
+                {
+                  cfg->conversions_mask |= C_URING;
+                  cfg->engine = ENGINE_URING;
+                }
               else
                 {
                   error (0, 0, _("unrecognized option in opt: %s"), quoteaf (tok));

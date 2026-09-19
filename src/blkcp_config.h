@@ -49,8 +49,21 @@ enum dd_conversions
   C_FORCE = 01000000,
   C_SHA256 = 02000000,
   C_ASYNC = 04000000,
-  C_REFLINK = 010000000
+  C_REFLINK = 010000000,
+  C_URING = 020000000
 };
+
+/**
+ * @brief Execution backend engine selection for data transfer.
+ */
+typedef enum blkcp_engine
+{
+  ENGINE_AUTO = 0,    /**< Automatic backend detection (Reflink -> Uring/Async -> Sync) */
+  ENGINE_SYNC,        /**< Standard synchronous block I/O engine */
+  ENGINE_ASYNC,       /**< Multi-threaded ringbuffer pipeline */
+  ENGINE_REFLINK,     /**< Linux Kernel zero-copy copy_file_range */
+  ENGINE_URING        /**< Linux io_uring asynchronous execution */
+} blkcp_engine_t;
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))
 #define MULTIPLE_BITS_SET(i) (((i) & ((i) - 1)) != 0)
@@ -115,6 +128,7 @@ typedef struct dd_config
   intmax_t max_records;           /**< Max records to copy (from count=N) */
   idx_t max_bytes;                /**< Remaining bytes to copy when iflag=count_bytes */
   intmax_t bytes_to_copy;         /**< Exact byte count limit (bytes=N, tocopy=N, tc=N; -1 = unbounded) */
+  blkcp_engine_t engine;          /**< Explicitly chosen I/O execution backend engine */
   int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
   int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
   int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */

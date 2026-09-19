@@ -24,6 +24,7 @@
 #include "verror.h"
 #include "xalloc.h"
 
+#include <stdckdint.h>
 #include "blkcp_config.h"
 #include "stats.h"
 #include "signals.h"
@@ -80,10 +81,13 @@ reflink_driver_init (dd_context_t *ctx, void **state)
 
   if (ctx->cfg.bytes_to_copy >= 0)
     st->total_byte_limit = ctx->cfg.bytes_to_copy;
-  else if ((ctx->cfg.input_flags & O_COUNT_BYTES) && ctx->cfg.max_records != INTMAX_MAX)
-    st->total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
   else if (ctx->cfg.max_records != INTMAX_MAX || ctx->cfg.max_bytes != 0)
-    st->total_byte_limit = ctx->cfg.max_records * ctx->cfg.input_blocksize + ctx->cfg.max_bytes;
+    {
+      intmax_t prod;
+      if (ckd_mul (&prod, ctx->cfg.max_records, ctx->cfg.input_blocksize)
+          || ckd_add (&st->total_byte_limit, prod, ctx->cfg.max_bytes))
+        st->total_byte_limit = INTMAX_MAX;
+    }
 
   /* Interactive chunking: clamp between 16 MiB and 64 MiB so signals/progress remain responsive */
   st->chunk_size = MAX (ctx->cfg.output_blocksize, 16 * 1024 * 1024);

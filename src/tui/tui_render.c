@@ -29,7 +29,7 @@ tui_init_form(tui_form_t *form)
 void
 tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t cmd_len)
 {
-    char const *bin = (dd_bin && dd_bin[0]) ? dd_bin : "./dd";
+    char const *bin = (dd_bin && dd_bin[0]) ? dd_bin : "./blkcp";
     char prefix[600] = "";
     char buf[1024];
     char suffix[600] = "";
@@ -42,7 +42,7 @@ tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t 
             snprintf(prefix, sizeof prefix, "%.500s | ", form->if_path);
         }
     } else if (form->if_path[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " if=\"%.500s\"", form->if_path);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -i \"%.500s\"", form->if_path);
     }
 
     /* Output stream / pipe */
@@ -51,72 +51,39 @@ tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t 
             snprintf(suffix, sizeof suffix, " | %.500s", form->of_path);
         }
     } else if (form->of_path[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " of=\"%.500s\"", form->of_path);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -o \"%.500s\"", form->of_path);
     }
 
     if (form->bs[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " bs=%s", form->bs);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -b %s", form->bs);
     }
     if (form->count[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " count=%s", form->count);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -c %s", form->count);
     }
     if (form->skip[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " skip=%s", form->skip);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --skip=%s", form->skip);
     }
     if (form->seek[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " seek=%s", form->seek);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --seek=%s", form->seek);
     }
 
-    /* Build opt= list */
-    char opts[128] = "";
+    /* Engine & Optimizers */
     if (form->opt_autotune && strcmp(form->bs, "auto") != 0) {
-        snprintf(opts + strlen(opts), sizeof(opts) - strlen(opts), "%sauto", opts[0] ? "," : "");
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --autotune");
     }
     if (form->opt_async) {
-        snprintf(opts + strlen(opts), sizeof(opts) - strlen(opts), "%sasync", opts[0] ? "," : "");
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e async");
     }
     if (form->opt_sha256) {
-        snprintf(opts + strlen(opts), sizeof(opts) - strlen(opts), "%shash", opts[0] ? "," : "");
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --hash");
     }
     if (form->opt_force) {
-        snprintf(opts + strlen(opts), sizeof(opts) - strlen(opts), "%sforce", opts[0] ? "," : "");
-    }
-    if (opts[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " opt=%s", opts);
-    }
-
-    /* conv */
-    if (form->conv[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " conv=%s", form->conv);
-    }
-
-    /* iflag */
-    char iflags[128] = "";
-    if (form->iflag[0]) snprintf(iflags, sizeof iflags, "%s", form->iflag);
-    if (form->count_bytes) {
-        snprintf(iflags + strlen(iflags), sizeof(iflags) - strlen(iflags), "%scount_bytes", iflags[0] ? "," : "");
-    }
-    if (form->skip_bytes) {
-        snprintf(iflags + strlen(iflags), sizeof(iflags) - strlen(iflags), "%sskip_bytes", iflags[0] ? "," : "");
-    }
-    if (iflags[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " iflag=%s", iflags);
-    }
-
-    /* oflag */
-    char oflags[128] = "";
-    if (form->oflag[0]) snprintf(oflags, sizeof oflags, "%s", form->oflag);
-    if (form->seek_bytes) {
-        snprintf(oflags + strlen(oflags), sizeof(oflags) - strlen(oflags), "%sseek_bytes", oflags[0] ? "," : "");
-    }
-    if (oflags[0]) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " oflag=%s", oflags);
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -f");
     }
 
     /* status */
-    if (form->status_mode == 0) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " status=none");
-    else if (form->status_mode == 1) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " status=noxfer");
-    else if (form->status_mode == 2) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " status=progress");
+    if (form->status_mode == 0) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -q");
+    else if (form->status_mode == 2) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -p");
 
     snprintf(cmd, cmd_len, "%s%s%s", prefix, buf, suffix);
 }

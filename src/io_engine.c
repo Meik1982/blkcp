@@ -212,7 +212,15 @@ dd_alloc_ibuf (dd_context_t *ctx)
   if (ctx->ibuf)
     return;
 
-  idx_t alloc_size = ctx->cfg.input_blocksize + ctx->cfg.conversion_blocksize + 2;
+  idx_t bs = ctx->cfg.input_blocksize;
+  if (ctx->cfg.conversions_mask & C_AUTOTUNE)
+    {
+      /* Ensure buffer accommodates the maximum autotune stage (4 MiB) */
+      if (bs < 4 * 1024 * 1024)
+        bs = 4 * 1024 * 1024;
+    }
+
+  idx_t alloc_size = bs + ctx->cfg.conversion_blocksize + 2;
   ctx->ibuf = alignalloc (ctx->page_size, alloc_size);
   if (!ctx->ibuf)
     xalloc_die ();
@@ -224,9 +232,16 @@ dd_alloc_obuf (dd_context_t *ctx)
   if (ctx->obuf)
     return;
 
+  idx_t bs = ctx->cfg.output_blocksize;
+  if (ctx->cfg.conversions_mask & C_AUTOTUNE)
+    {
+      if (bs < 4 * 1024 * 1024)
+        bs = 4 * 1024 * 1024;
+    }
+
   if (ctx->cfg.conversions_mask & (C_BLOCK | C_UNBLOCK | C_SWAB))
     {
-      idx_t alloc_size = ctx->cfg.output_blocksize + ctx->cfg.conversion_blocksize + 2;
+      idx_t alloc_size = bs + ctx->cfg.conversion_blocksize + 2;
       ctx->obuf = alignalloc (ctx->page_size, alloc_size);
     }
   else if (ctx->cfg.input_blocksize == ctx->cfg.output_blocksize && ctx->ibuf)
@@ -236,7 +251,7 @@ dd_alloc_obuf (dd_context_t *ctx)
     }
   else
     {
-      ctx->obuf = alignalloc (ctx->page_size, ctx->cfg.output_blocksize);
+      ctx->obuf = alignalloc (ctx->page_size, bs);
     }
 
   if (!ctx->obuf)
@@ -470,15 +485,26 @@ dd_copy_with_unblock (dd_context_t *ctx, char const *buf, idx_t nbytes)
 const dd_io_driver_t *
 dd_select_io_driver (dd_context_t *ctx)
 {
-  /* 1. Explicit Async Pipeline or flag */
-  if ((ctx->cfg.conversions_mask & C_ASYNC) || (ctx->cfg.output_flags & O_ASYNC_PIPELINE))
+#if defined __linux__
+  /* 1. Explicit io_uring request */
+  if (ctx->cfg.engine == ENGINE_URING || (ctx->cfg.conversions_mask & C_URING))
+    return &uring_io_driver;
+
+  /* 2. Explicit reflink / zero-copy request */
+  if (ctx->cfg.engine == ENGINE_REFLINK || (ctx->cfg.conversions_mask & C_REFLINK))
+    return &reflink_io_driver;
+#endif
+
+  /* 3. Explicit Async Pipeline or flag */
+  if (ctx->cfg.engine == ENGINE_ASYNC || (ctx->cfg.conversions_mask & C_ASYNC) || (ctx->cfg.output_flags & O_ASYNC_PIPELINE))
     return &async_io_driver;
 
-#if defined __linux__
-  /* 2. Explicit or opportunistic zero-copy reflink via copy_file_range */
-  if (ctx->cfg.conversions_mask & C_REFLINK)
-    return &reflink_io_driver;
+  /* 4. Explicit Sync block driver */
+  if (ctx->cfg.engine == ENGINE_SYNC)
+    return &sync_io_driver;
 
+#if defined __linux__
+  /* 5. Opportunistic zero-copy reflink via copy_file_range when engine == ENGINE_AUTO */
   const int incompatible = C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK
                          | C_LCASE | C_UCASE | C_SWAB | C_SYNC | C_SHA256
                          | C_SPARSE | C_AUTOTUNE;
@@ -494,7 +520,7 @@ dd_select_io_driver (dd_context_t *ctx)
     }
 #endif
 
-  /* 3. Standard synchronous driver */
+  /* 6. Default standard synchronous driver */
   return &sync_io_driver;
 }
 

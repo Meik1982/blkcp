@@ -1,6 +1,6 @@
 /**
  * @file tui_render.h
- * @brief Form state and rendering interface for dd-tui
+ * @brief Form state and rendering interface for blkcp-tui
  */
 
 #ifndef TUI_RENDER_H
@@ -9,6 +9,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <ncurses.h>
+
+/**
+ * @brief Engine execution mode in TUI
+ */
+typedef enum tui_engine_mode {
+    TUI_ENGINE_AUTO = 0,
+    TUI_ENGINE_URING,
+    TUI_ENGINE_ASYNC,
+    TUI_ENGINE_REFLINK,
+    TUI_ENGINE_SYNC,
+    TUI_ENGINE_COUNT
+} tui_engine_mode_t;
 
 /**
  * @brief Interactive field IDs for focus and keyboard navigation
@@ -22,20 +34,18 @@ typedef enum tui_field_id {
     FIELD_OF_SEARCH_FILE,
     FIELD_OF_SEARCH_DEV,
     FIELD_OF_SEARCH_PIPE,
+    FIELD_ENGINE,
     FIELD_BS,
+    FIELD_LIMIT,
     FIELD_COUNT,
-    FIELD_COUNT_BYTES,
     FIELD_SKIP,
-    FIELD_SKIP_BYTES,
     FIELD_SEEK,
-    FIELD_SEEK_BYTES,
     FIELD_OPT_AUTOTUNE,
-    FIELD_OPT_ASYNC,
     FIELD_OPT_SHA256,
+    FIELD_OPT_DIRECT,
     FIELD_OPT_FORCE,
-    FIELD_CONV,
-    FIELD_IFLAG,
-    FIELD_OFLAG,
+    FIELD_OPT_SPARSE,
+    FIELD_OPT_SYNC,
     FIELD_STATUS,
     FIELD_BTN_START,
     FIELD_BTN_COPY,
@@ -51,25 +61,24 @@ typedef struct tui_form {
     bool if_is_pipe;
     char of_path[512];
     bool of_is_pipe;
+
+    tui_engine_mode_t engine;
     char bs[64];
+    char limit[64];
     char count[64];
-    bool count_bytes;
     char skip[64];
-    bool skip_bytes;
     char seek[64];
-    bool seek_bytes;
 
-    /* Modern features */
+    /* Modern features & flags */
     bool opt_autotune;
-    bool opt_async;
     bool opt_sha256;
+    bool opt_direct;
     bool opt_force;
+    bool opt_sparse;
+    bool opt_sync;
 
-    /* Standard options */
-    char conv[128];
-    char iflag[128];
-    char oflag[128];
-    int status_mode; /* 0=none, 1=noxfer, 2=progress */
+    /* Telemetry verbosity */
+    int status_mode; /* 0=quiet (-q), 1=default, 2=progress (-p) */
 
     /* Live state */
     bool running;
@@ -91,11 +100,11 @@ void tui_init_form(tui_form_t *form);
 /**
  * @brief Generates the command-line string matching current form settings
  * @param form Form model
- * @param dd_bin Binary path to invoke (defaults to "./dd" if NULL)
+ * @param blkcp_bin Binary path to invoke (defaults to "./blkcp" if NULL)
  * @param cmd Output buffer
  * @param cmd_len Buffer size
  */
-void tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t cmd_len);
+void tui_build_command(tui_form_t const *form, char const *blkcp_bin, char *cmd, size_t cmd_len);
 
 /**
  * @brief Renders the entire TUI form window

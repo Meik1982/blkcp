@@ -1,6 +1,6 @@
 /**
  * @file tui_main.c
- * @brief Interactive TUI executable for modular dd using ncursesw
+ * @brief Interactive TUI executable for blkcp using ncursesw
  */
 
 #include <config.h>
@@ -26,7 +26,7 @@ static void
 edit_text_modal(char const *title, char *target, size_t target_len)
 {
     int win_h = 7;
-    int win_w = 60;
+    int win_w = 64;
     int start_y = (LINES - win_h) / 2;
     int start_x = (COLS - win_w) / 2;
 
@@ -117,10 +117,10 @@ copy_to_clipboard(tui_form_t *form, char const *cmd)
         }
     }
 
-    /* Fallback: Write to helper file */
+    /* Fallback: Write to helper script */
     char const *home = getenv("HOME");
     char path[512];
-    snprintf(path, sizeof path, "%s/dd_command.sh", home ? home : "/tmp");
+    snprintf(path, sizeof path, "%s/blkcp_command.sh", home ? home : "/tmp");
     FILE *f = fopen(path, "w");
     if (f) {
         fprintf(f, "#!/bin/sh\n%s\n", cmd);
@@ -133,10 +133,10 @@ copy_to_clipboard(tui_form_t *form, char const *cmd)
 }
 
 static void
-execute_dd_job(WINDOW *main_win, tui_form_t *form)
+execute_blkcp_job(WINDOW *main_win, tui_form_t *form)
 {
     if (form->if_path[0] == '\0' || form->of_path[0] == '\0') {
-        snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: Bitte Input (if) und Output (of) angeben!");
+        snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: Bitte Input (-i) und Output (-o) angeben!");
         return;
     }
 
@@ -148,10 +148,10 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
         }
     }
 
-    char full_bin[600] = "./dd";
+    char full_bin[600] = "./blkcp";
     char cwd[512];
     if (getcwd(cwd, sizeof cwd)) {
-        snprintf(full_bin, sizeof full_bin, "%.500s/dd", cwd);
+        snprintf(full_bin, sizeof full_bin, "%.500s/blkcp", cwd);
     }
 
     char cmd_body[1600];
@@ -169,7 +169,7 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
     FILE *fp = popen(full_cmd, "r");
     if (!fp) {
         form->running = false;
-        snprintf(form->status_msg, sizeof form->status_msg, "Fehler beim Starten von dd!");
+        snprintf(form->status_msg, sizeof form->status_msg, "Fehler beim Starten von blkcp!");
         return;
     }
 
@@ -182,16 +182,16 @@ execute_dd_job(WINDOW *main_win, tui_form_t *form)
 
         if (strncmp(line, "sha256: ", 8) == 0) {
             snprintf(form->sha256_result, sizeof form->sha256_result, "%.64s", line + 8);
-        } else if (strstr(line, "copied")) {
-            snprintf(form->status_msg, sizeof form->status_msg, "%.60s", line);
+        } else if (strstr(line, "copied") || strstr(line, "kopiert")) {
+            snprintf(form->status_msg, sizeof form->status_msg, "%.68s", line);
             form->progress_pct = 75.0;
             tui_render(main_win, form);
         } else if (strstr(line, "SAFETY GUARD")) {
             snprintf(last_err, sizeof last_err, "Safety Guard: Ziel enthaelt gemountetes Root!");
         } else {
             char const *p = line;
-            if (strncmp(p, "./dd: ", 6) == 0) p += 6;
-            else if (strncmp(p, "dd: ", 4) == 0) p += 4;
+            if (strncmp(p, "./blkcp: ", 9) == 0) p += 9;
+            else if (strncmp(p, "blkcp: ", 7) == 0) p += 7;
             while (*p == ' ') p++;
             if (*p != '\0') {
                 snprintf(last_err, sizeof last_err, "%.200s", p);
@@ -233,14 +233,15 @@ main(void)
         init_pair(4, COLOR_CYAN, -1);
     }
 
-    int win_h = 31;
-    int win_w = 78;
-    int start_y = (LINES - win_h) / 2;
-    int start_x = (COLS - win_w) / 2;
-    if (start_y < 0) start_y = 0;
-    if (start_x < 0) start_x = 0;
+    int min_h = 30;
+    int min_w = 80;
+    if (LINES < min_h || COLS < min_w) {
+        endwin();
+        fprintf(stderr, "Terminal zu klein! Minimum: %dx%d (Aktuell: %dx%d)\n", min_w, min_h, COLS, LINES);
+        return EXIT_FAILURE;
+    }
 
-    WINDOW *win = newwin(win_h, win_w, start_y, start_x);
+    WINDOW *win = newwin(min_h, min_w, (LINES - min_h) / 2, (COLS - min_w) / 2);
     keypad(win, TRUE);
 
     tui_form_t form;
@@ -249,56 +250,45 @@ main(void)
     bool running = true;
     while (running) {
         tui_render(win, &form);
+
         int ch = wgetch(win);
-
         switch (ch) {
-        case KEY_RESIZE:
-            start_y = (LINES - win_h) / 2;
-            start_x = (COLS - win_w) / 2;
-            if (start_y < 0) start_y = 0;
-            if (start_x < 0) start_x = 0;
-            erase();
-            refresh();
-            mvwin(win, start_y, start_x);
-            break;
-
-        case '\t':
-            form.active_field = (form.active_field + 1) % FIELD_COUNT_TOTAL;
-            break;
-
-        case KEY_BTAB:
-            if (form.active_field == 0)
-                form.active_field = FIELD_COUNT_TOTAL - 1;
-            else
-                form.active_field--;
-            break;
-
         case KEY_UP:
             form.active_field = tui_nav_up(form.active_field);
             break;
-
         case KEY_DOWN:
             form.active_field = tui_nav_down(form.active_field);
             break;
-
         case KEY_LEFT:
             form.active_field = tui_nav_left(form.active_field);
             break;
-
         case KEY_RIGHT:
             form.active_field = tui_nav_right(form.active_field);
             break;
+        case '\t':
+            form.active_field = (form.active_field + 1) % FIELD_COUNT_TOTAL;
+            break;
+        case KEY_BTAB:
+            form.active_field = (form.active_field + FIELD_COUNT_TOTAL - 1) % FIELD_COUNT_TOTAL;
+            break;
 
         case ' ':
-            /* Checkbox toggle or Radio increment */
-            if (form.active_field == FIELD_COUNT_BYTES) form.count_bytes = !form.count_bytes;
-            else if (form.active_field == FIELD_SKIP_BYTES) form.skip_bytes = !form.skip_bytes;
-            else if (form.active_field == FIELD_SEEK_BYTES) form.seek_bytes = !form.seek_bytes;
-            else if (form.active_field == FIELD_OPT_AUTOTUNE) form.opt_autotune = !form.opt_autotune;
-            else if (form.active_field == FIELD_OPT_ASYNC) form.opt_async = !form.opt_async;
-            else if (form.active_field == FIELD_OPT_SHA256) form.opt_sha256 = !form.opt_sha256;
-            else if (form.active_field == FIELD_OPT_FORCE) form.opt_force = !form.opt_force;
-            else if (form.active_field == FIELD_STATUS) form.status_mode = (form.status_mode + 1) % 3;
+            if (form.active_field == FIELD_ENGINE)
+                form.engine = (form.engine + 1) % TUI_ENGINE_COUNT;
+            else if (form.active_field == FIELD_OPT_AUTOTUNE)
+                form.opt_autotune = !form.opt_autotune;
+            else if (form.active_field == FIELD_OPT_SHA256)
+                form.opt_sha256 = !form.opt_sha256;
+            else if (form.active_field == FIELD_OPT_DIRECT)
+                form.opt_direct = !form.opt_direct;
+            else if (form.active_field == FIELD_OPT_FORCE)
+                form.opt_force = !form.opt_force;
+            else if (form.active_field == FIELD_OPT_SPARSE)
+                form.opt_sparse = !form.opt_sparse;
+            else if (form.active_field == FIELD_OPT_SYNC)
+                form.opt_sync = !form.opt_sync;
+            else if (form.active_field == FIELD_STATUS)
+                form.status_mode = (form.status_mode + 1) % 3;
             break;
 
         case 10:
@@ -327,48 +317,63 @@ main(void)
             } else if (form.active_field == FIELD_OF_SEARCH_PIPE) {
                 if (tui_pick_pipe(false, form.of_path, sizeof form.of_path) == 0)
                     form.of_is_pipe = true;
-            } else if (form.active_field == FIELD_BS)
-                edit_text_modal("Block Size (-b, z.B. auto, 1M, 64k):", form.bs, sizeof form.bs);
-            else if (form.active_field == FIELD_COUNT)
+            } else if (form.active_field == FIELD_ENGINE) {
+                form.engine = (form.engine + 1) % TUI_ENGINE_COUNT;
+            } else if (form.active_field == FIELD_BS) {
+                edit_text_modal("Block Size (-b, z.B. auto, 1M, 64k, 4M):", form.bs, sizeof form.bs);
+            } else if (form.active_field == FIELD_LIMIT) {
+                edit_text_modal("Limit (-l, Exakte Bytes z.B. 10G, 500M, 4194304):", form.limit, sizeof form.limit);
+            } else if (form.active_field == FIELD_COUNT) {
                 edit_text_modal("Count (-c, Anzahl Bloecke):", form.count, sizeof form.count);
-            else if (form.active_field == FIELD_SKIP)
-                edit_text_modal("Skip Offset (--skip, z.B. 10M, 512):", form.skip, sizeof form.skip);
-            else if (form.active_field == FIELD_SEEK)
-                edit_text_modal("Seek Offset (--seek, z.B. 10M, 512):", form.seek, sizeof form.seek);
-            else if (form.active_field == FIELD_CONV)
-                edit_text_modal("conv= (z.B. noerror,sync,ucase):", form.conv, sizeof form.conv);
-            else if (form.active_field == FIELD_IFLAG)
-                edit_text_modal("iflag= (z.B. direct):", form.iflag, sizeof form.iflag);
-            else if (form.active_field == FIELD_OFLAG)
-                edit_text_modal("oflag= (z.B. direct):", form.oflag, sizeof form.oflag);
-            else if (form.active_field == FIELD_COUNT_BYTES) form.count_bytes = !form.count_bytes;
-            else if (form.active_field == FIELD_SKIP_BYTES) form.skip_bytes = !form.skip_bytes;
-            else if (form.active_field == FIELD_SEEK_BYTES) form.seek_bytes = !form.seek_bytes;
-            else if (form.active_field == FIELD_OPT_AUTOTUNE) form.opt_autotune = !form.opt_autotune;
-            else if (form.active_field == FIELD_OPT_ASYNC) form.opt_async = !form.opt_async;
-            else if (form.active_field == FIELD_OPT_SHA256) form.opt_sha256 = !form.opt_sha256;
-            else if (form.active_field == FIELD_OPT_FORCE) form.opt_force = !form.opt_force;
-            else if (form.active_field == FIELD_STATUS) form.status_mode = (form.status_mode + 1) % 3;
-            else if (form.active_field == FIELD_BTN_START) {
-                execute_dd_job(win, &form);
+            } else if (form.active_field == FIELD_SKIP) {
+                edit_text_modal("Skip Offset (--skip, z.B. 10M, 65536):", form.skip, sizeof form.skip);
+            } else if (form.active_field == FIELD_SEEK) {
+                edit_text_modal("Seek Offset (--seek, z.B. 10M, 65536):", form.seek, sizeof form.seek);
+            } else if (form.active_field == FIELD_OPT_AUTOTUNE) {
+                form.opt_autotune = !form.opt_autotune;
+            } else if (form.active_field == FIELD_OPT_SHA256) {
+                form.opt_sha256 = !form.opt_sha256;
+            } else if (form.active_field == FIELD_OPT_DIRECT) {
+                form.opt_direct = !form.opt_direct;
+            } else if (form.active_field == FIELD_OPT_FORCE) {
+                form.opt_force = !form.opt_force;
+            } else if (form.active_field == FIELD_OPT_SPARSE) {
+                form.opt_sparse = !form.opt_sparse;
+            } else if (form.active_field == FIELD_OPT_SYNC) {
+                form.opt_sync = !form.opt_sync;
+            } else if (form.active_field == FIELD_STATUS) {
+                form.status_mode = (form.status_mode + 1) % 3;
+            } else if (form.active_field == FIELD_BTN_START) {
+                execute_blkcp_job(win, &form);
             } else if (form.active_field == FIELD_BTN_COPY) {
                 char cmd[1024];
-                tui_build_command(&form, "./dd", cmd, sizeof cmd);
+                tui_build_command(&form, "./blkcp", cmd, sizeof cmd);
                 copy_to_clipboard(&form, cmd);
             } else if (form.active_field == FIELD_BTN_QUIT) {
                 running = false;
             }
             break;
 
-        case 27: /* Esc */
+        case 'c':
+        case 'C': {
+            char cmd[1024];
+            tui_build_command(&form, "./blkcp", cmd, sizeof cmd);
+            copy_to_clipboard(&form, cmd);
+            break;
+        }
+
         case 'q':
         case 'Q':
+        case 27: /* ESC */
             running = false;
+            break;
+
+        default:
             break;
         }
     }
 
     delwin(win);
     endwin();
-    return 0;
+    return EXIT_SUCCESS;
 }

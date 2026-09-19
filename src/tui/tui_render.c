@@ -1,6 +1,6 @@
 /**
  * @file tui_render.c
- * @brief Rendering and command generation implementation for dd-tui
+ * @brief Form rendering and visual command generator for blkcp-tui
  */
 
 #include <config.h>
@@ -8,28 +8,26 @@
 #define _XOPEN_SOURCE 600
 
 #include "tui_render.h"
-#include <stdio.h>
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 void
 tui_init_form(tui_form_t *form)
 {
     memset(form, 0, sizeof *form);
+    form->engine = TUI_ENGINE_AUTO;
     snprintf(form->bs, sizeof form->bs, "auto");
+    form->status_mode = 2; /* -p (progress) by default */
     form->opt_autotune = true;
-    form->opt_async = true;
-    form->opt_sha256 = true;
-    form->opt_force = false;
-    form->status_mode = 2; /* progress */
-    snprintf(form->eta_str, sizeof form->eta_str, "--:--:--");
-    snprintf(form->status_msg, sizeof form->status_msg, "Bereit. Waehle Quelle & Ziel.");
-    form->active_field = FIELD_IF_SEARCH_FILE;
+    form->active_field = FIELD_IF;
+    snprintf(form->status_msg, sizeof form->status_msg, "Bereit. Waehle Input/Output und druecke START.");
 }
 
 void
-tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t cmd_len)
+tui_build_command(tui_form_t const *form, char const *blkcp_bin, char *cmd, size_t cmd_len)
 {
-    char const *bin = (dd_bin && dd_bin[0]) ? dd_bin : "./blkcp";
+    char const *bin = (blkcp_bin && blkcp_bin[0]) ? blkcp_bin : "./blkcp";
     char prefix[600] = "";
     char buf[1024];
     char suffix[600] = "";
@@ -54,12 +52,40 @@ tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t 
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -o \"%.500s\"", form->of_path);
     }
 
+    /* Engine */
+    switch (form->engine) {
+    case TUI_ENGINE_URING:
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e uring");
+        break;
+    case TUI_ENGINE_ASYNC:
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e async");
+        break;
+    case TUI_ENGINE_REFLINK:
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e reflink");
+        break;
+    case TUI_ENGINE_SYNC:
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e sync");
+        break;
+    default:
+        break; /* auto engine is default */
+    }
+
+    /* Block size */
     if (form->bs[0]) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -b %s", form->bs);
     }
+
+    /* Exact byte limit */
+    if (form->limit[0]) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -l %s", form->limit);
+    }
+
+    /* Block count */
     if (form->count[0]) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -c %s", form->count);
     }
+
+    /* Skip & Seek */
     if (form->skip[0]) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --skip=%s", form->skip);
     }
@@ -67,23 +93,32 @@ tui_build_command(tui_form_t const *form, char const *dd_bin, char *cmd, size_t 
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --seek=%s", form->seek);
     }
 
-    /* Engine & Optimizers */
+    /* Flags */
     if (form->opt_autotune && strcmp(form->bs, "auto") != 0) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --autotune");
     }
-    if (form->opt_async) {
-        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e async");
-    }
     if (form->opt_sha256) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --hash");
+    }
+    if (form->opt_direct) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --direct");
+    }
+    if (form->opt_sparse) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --sparse");
+    }
+    if (form->opt_sync) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --sync");
     }
     if (form->opt_force) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -f");
     }
 
-    /* status */
-    if (form->status_mode == 0) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -q");
-    else if (form->status_mode == 2) snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -p");
+    /* Status level */
+    if (form->status_mode == 0) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -q");
+    } else if (form->status_mode == 2) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -p");
+    }
 
     snprintf(cmd, cmd_len, "%s%s%s", prefix, buf, suffix);
 }
@@ -110,8 +145,20 @@ static void
 draw_checkbox(WINDOW *win, int y, int x, char const *label, bool checked, bool focused)
 {
     if (focused) wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
-    mvwprintw(win, y, x, "[%c] %s", checked ? '*' : ' ', label);
+    mvwprintw(win, y, x, "[%c] %s", checked ? 'x' : ' ', label);
     if (focused) wattroff(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
+}
+
+static char const *
+engine_name_str(tui_engine_mode_t engine)
+{
+    switch (engine) {
+    case TUI_ENGINE_URING:   return "io_uring (Async Kernel Queue)";
+    case TUI_ENGINE_ASYNC:   return "async (Pthread Ringbuffer)";
+    case TUI_ENGINE_REFLINK: return "reflink (Zero-Copy copy_file_range)";
+    case TUI_ENGINE_SYNC:    return "sync (Standard Block I/O)";
+    default:                 return "auto (Intelligent Auto-Detection)";
+    }
 }
 
 void
@@ -120,80 +167,82 @@ tui_render(WINDOW *win, tui_form_t const *form)
     werase(win);
     box(win, 0, 0);
 
-    /* Title */
+    /* Header */
     wattron(win, A_BOLD | COLOR_PAIR(4));
-    mvwprintw(win, 0, 13, " [ dd TUI: High-Performance Disk & Image Manager ] ");
+    mvwprintw(win, 1, 2, "=== blkcp-tui :: Next-Gen Block Copy & Imaging Assistant ===");
     wattroff(win, A_BOLD | COLOR_PAIR(4));
 
-    /* Section 1: Ein- und Ausgabe */
+    /* Section 1: Input & Output */
     wattron(win, A_BOLD);
-    mvwprintw(win, 2, 2, "[ Ein- und Ausgabe ]");
+    mvwprintw(win, 3, 2, "[ 1. Input & Output Streams ]");
     wattroff(win, A_BOLD);
 
-    draw_field_str(win, 3, 2, "Input (if):  ", form->if_path, 26, form->active_field == FIELD_IF);
-    draw_button(win, 3, 44, "Datei", form->active_field == FIELD_IF_SEARCH_FILE, 3);
-    draw_button(win, 3, 54, "Disk", form->active_field == FIELD_IF_SEARCH_DEV, 3);
-    draw_button(win, 3, 63, "Pipe", form->active_field == FIELD_IF_SEARCH_PIPE, 4);
+    draw_field_str(win, 4, 2, "Input (-i):  ", form->if_path, 28, form->active_field == FIELD_IF);
+    draw_button(win, 4, 45, "File", form->active_field == FIELD_IF_SEARCH_FILE, 4);
+    draw_button(win, 4, 54, "Disk", form->active_field == FIELD_IF_SEARCH_DEV, 3);
+    draw_button(win, 4, 63, "Pipe", form->active_field == FIELD_IF_SEARCH_PIPE, 4);
 
-    draw_field_str(win, 4, 2, "Output (of): ", form->of_path, 26, form->active_field == FIELD_OF);
-    draw_button(win, 4, 44, "Datei", form->active_field == FIELD_OF_SEARCH_FILE, 3);
-    draw_button(win, 4, 54, "Disk", form->active_field == FIELD_OF_SEARCH_DEV, 3);
-    draw_button(win, 4, 63, "Pipe", form->active_field == FIELD_OF_SEARCH_PIPE, 4);
+    draw_field_str(win, 5, 2, "Output (-o): ", form->of_path, 28, form->active_field == FIELD_OF);
+    draw_button(win, 5, 45, "File", form->active_field == FIELD_OF_SEARCH_FILE, 4);
+    draw_button(win, 5, 54, "Disk", form->active_field == FIELD_OF_SEARCH_DEV, 3);
+    draw_button(win, 5, 63, "Pipe", form->active_field == FIELD_OF_SEARCH_PIPE, 4);
 
-    /* Section 2: Block-Konfiguration */
+    /* Section 2: Engine & Performance */
     wattron(win, A_BOLD);
-    mvwprintw(win, 6, 2, "[ Block-Konfiguration (bs, count, skip, seek) ]");
+    mvwprintw(win, 7, 2, "[ 2. Engine & Performance Configuration ]");
     wattroff(win, A_BOLD);
 
-    draw_field_str(win, 7, 2, "Block Size (bs): ", form->bs, 10, form->active_field == FIELD_BS);
-    mvwprintw(win, 7, 33, "(z.B. auto, 1M, 64k, 4M)");
+    /* Engine Selector */
+    mvwprintw(win, 8, 2, "Engine (-e): ");
+    if (form->active_field == FIELD_ENGINE) {
+        wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
+    }
+    mvwprintw(win, 8, 15, "< %-36s > (Leertaste)", engine_name_str(form->engine));
+    if (form->active_field == FIELD_ENGINE) {
+        wattroff(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
+    }
 
-    draw_field_str(win, 8, 2, "Count:           ", form->count, 10, form->active_field == FIELD_COUNT);
-    draw_checkbox(win, 8, 33, "count_bytes (iflag)", form->count_bytes, form->active_field == FIELD_COUNT_BYTES);
+    draw_field_str(win, 9, 2, "Blocksize (-b): ", form->bs, 10, form->active_field == FIELD_BS);
+    mvwprintw(win, 9, 32, "(z.B. auto, 64K, 1M, 4M, 16M)");
 
-    draw_field_str(win, 9, 2, "Skip (Input):    ", form->skip, 10, form->active_field == FIELD_SKIP);
-    draw_checkbox(win, 9, 33, "skip_bytes  (iflag)", form->skip_bytes, form->active_field == FIELD_SKIP_BYTES);
+    draw_field_str(win, 10, 2, "Limit (-l):     ", form->limit, 10, form->active_field == FIELD_LIMIT);
+    mvwprintw(win, 10, 32, "(Exakte Bytes, z.B. 10G, 500M, 4529848)");
 
-    draw_field_str(win, 10, 2, "Seek (Output):   ", form->seek, 10, form->active_field == FIELD_SEEK);
-    draw_checkbox(win, 10, 33, "seek_bytes  (oflag)", form->seek_bytes, form->active_field == FIELD_SEEK_BYTES);
+    draw_field_str(win, 11, 2, "Count (-c):     ", form->count, 10, form->active_field == FIELD_COUNT);
+    draw_field_str(win, 11, 32, "Skip (--skip): ", form->skip, 8, form->active_field == FIELD_SKIP);
+    draw_field_str(win, 11, 55, "Seek (--seek): ", form->seek, 8, form->active_field == FIELD_SEEK);
 
-    /* Section 3: Moderne Erweiterungen */
+    /* Section 3: Modifikatoren & Flags */
     wattron(win, A_BOLD);
-    mvwprintw(win, 12, 2, "[ Moderne Erweiterungen (opt / flags) ]");
+    mvwprintw(win, 13, 2, "[ 3. Optimizers & Safety Guardrails ]");
     wattroff(win, A_BOLD);
 
-    draw_checkbox(win, 13, 2, "autotune (Dynamischer Benchmark)", form->opt_autotune, form->active_field == FIELD_OPT_AUTOTUNE);
-    draw_checkbox(win, 13, 40, "async  (Ringpuffer Pipeline)", form->opt_async, form->active_field == FIELD_OPT_ASYNC);
+    draw_checkbox(win, 14, 2, "Autotune (--autotune)", form->opt_autotune, form->active_field == FIELD_OPT_AUTOTUNE);
+    draw_checkbox(win, 14, 38, "SHA-256 Checksum (--hash)", form->opt_sha256, form->active_field == FIELD_OPT_SHA256);
 
-    draw_checkbox(win, 14, 2, "sha256   (On-the-fly Checksumme)", form->opt_sha256, form->active_field == FIELD_OPT_SHA256);
-    draw_checkbox(win, 14, 40, "force  (System-Root Override)", form->opt_force, form->active_field == FIELD_OPT_FORCE);
+    draw_checkbox(win, 15, 2, "Direct I/O (--direct)", form->opt_direct, form->active_field == FIELD_OPT_DIRECT);
+    draw_checkbox(win, 15, 38, "Force Target Guard Override (-f)", form->opt_force, form->active_field == FIELD_OPT_FORCE);
 
-    /* Section 4: Standard-Optionen */
-    wattron(win, A_BOLD);
-    mvwprintw(win, 16, 2, "[ Standard-Optionen ]");
-    wattroff(win, A_BOLD);
+    draw_checkbox(win, 16, 2, "Sparse Punch-Hole (--sparse)", form->opt_sparse, form->active_field == FIELD_OPT_SPARSE);
+    draw_checkbox(win, 16, 38, "Zero Padding Short Reads (--sync)", form->opt_sync, form->active_field == FIELD_OPT_SYNC);
 
-    draw_field_str(win, 17, 2, "conv:  ", form->conv, 12, form->active_field == FIELD_CONV);
-    draw_field_str(win, 17, 25, "iflag: ", form->iflag, 12, form->active_field == FIELD_IFLAG);
-    draw_field_str(win, 17, 48, "oflag: ", form->oflag, 12, form->active_field == FIELD_OFLAG);
-
-    mvwprintw(win, 18, 2, "Status: (%c) none   (%c) noxfer   (%c) progress",
+    /* Section 4: Telemetrie */
+    mvwprintw(win, 18, 2, "Status: (%c) Quiet (-q)   (%c) Standard   (%c) Live Progress (-p)",
               form->status_mode == 0 ? '*' : ' ',
               form->status_mode == 1 ? '*' : ' ',
               form->status_mode == 2 ? '*' : ' ');
     if (form->active_field == FIELD_STATUS) {
-        wattron(win, A_REVERSE);
+        wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
         mvwprintw(win, 18, 2, "Status:");
-        wattroff(win, A_REVERSE);
+        wattroff(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
     }
 
     /* Section 5: Live Status Box */
-    int st_y = 20;
+    int st_y = 19;
     int box_x = 2;
-    int box_w = 74;
-    int box_h = 5;
+    int box_w = 75;
+    int box_h = 6;
 
-    /* Render Box Border using standard curses ACS characters */
     mvwaddch(win, st_y, box_x, ACS_ULCORNER);
     for (int i = 1; i < box_w - 1; i++)
         waddch(win, ACS_HLINE);
@@ -211,7 +260,7 @@ tui_render(WINDOW *win, tui_form_t const *form)
     mvwaddch(win, st_y + box_h - 1, box_x + box_w - 1, ACS_LRCORNER);
 
     /* Progress bar */
-    int bar_w = 40;
+    int bar_w = 42;
     int filled = (int)(form->progress_pct * bar_w / 100.0);
     if (filled < 0) filled = 0;
     if (filled > bar_w) filled = bar_w;
@@ -228,38 +277,38 @@ tui_render(WINDOW *win, tui_form_t const *form)
 
     if (strncmp(form->status_msg, "FEHLER:", 7) == 0)
         wattron(win, COLOR_PAIR(1) | A_BOLD);
-    mvwprintw(win, st_y + 2, box_x + 2, "%-68.68s", form->status_msg);
+    mvwprintw(win, st_y + 2, box_x + 2, "%-70.70s", form->status_msg);
     if (strncmp(form->status_msg, "FEHLER:", 7) == 0)
         wattroff(win, COLOR_PAIR(1) | A_BOLD);
 
     if (form->sha256_result[0]) {
         wattron(win, A_BOLD | COLOR_PAIR(2));
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: %.64s", form->sha256_result);
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA-256: %.64s", form->sha256_result);
         wattroff(win, A_BOLD | COLOR_PAIR(2));
     } else if (!form->opt_sha256) {
         wattron(win, A_DIM);
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: (deaktiviert)                                            ");
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA-256: (deaktiviert)                                          ");
         wattroff(win, A_DIM);
     } else if (form->running) {
         wattron(win, A_BOLD | COLOR_PAIR(4));
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: [Streaming in-flight...]                                 ");
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA-256: [Streaming in-flight...]                               ");
         wattroff(win, A_BOLD | COLOR_PAIR(4));
     } else {
-        mvwprintw(win, st_y + 3, box_x + 2, "SHA256: (Streaming-Hash aktiv - On-the-Fly)                     ");
+        mvwprintw(win, st_y + 3, box_x + 2, "SHA-256: (Aktiviert: On-the-Fly Streaming-Berechnung)           ");
     }
 
     /* Live Command Preview */
     char cmd[1024];
-    tui_build_command(form, "./dd", cmd, sizeof cmd);
+    tui_build_command(form, "./blkcp", cmd, sizeof cmd);
     wattron(win, A_DIM);
-    mvwprintw(win, 26, 2, "Befehl: %-66.66s", cmd);
+    mvwprintw(win, 25, 2, "Befehl: %-68.68s", cmd);
     wattroff(win, A_DIM);
 
     /* Action Buttons */
-    int btn_y = 28;
-    draw_button(win, btn_y, 7, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
-    draw_button(win, btn_y, 30, "BEFEHL KOPIEREN", form->active_field == FIELD_BTN_COPY, 4);   /* Blue */
-    draw_button(win, btn_y, 55, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
+    int btn_y = 27;
+    draw_button(win, btn_y, 6, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
+    draw_button(win, btn_y, 29, "BEFEHL KOPIEREN (c)", form->active_field == FIELD_BTN_COPY, 4);/* Blue */
+    draw_button(win, btn_y, 56, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
 
     wrefresh(win);
 }

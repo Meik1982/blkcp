@@ -109,7 +109,19 @@ Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im se
 
 ---
 
-## 5. Bauen, Testen & Benchmarking
+## 5. Interaktive 2D-Spatial TUI (`blkcp-tui`)
+
+Das Projekt beinhaltet einen vollwertigen Terminal-Assistenten auf Basis von `ncursesw` (`bin/blkcp-tui`):
+* **Visuelle Stream-Auswahl:** Schnellauswahl für reguläre Dateien, physische Blockgeräte (`/sys/class/block`) und Pipes (`|`).
+* **Engine-Umschaltung im Flug:** Auswahl zwischen `io_uring`, `async`, `reflink`, `sync` und `auto` via Leertaste.
+* **Direktes Byte-Limit & Parameter:** Intuitive Konfiguration von Limits (`-l`), Blockgrößen (`-b`), Skip/Seek und Direkt-I/O (`--direct`, `--sparse`, `--sync`).
+* **Live-Telemetrie & Streaming-Hash:** Echtzeit-Fortschrittsbalken, Transferrate und Anzeige des Streaming-SHA-256-Hashes direkt im TUI-Fenster.
+* **Clipboard-Integration:** Exportiert den exakt generierten CLI-Befehl auf Tastendruck (`c`) direkt in die Wayland-/X11-Zwischenablage.
+* **Sicherheits-Dialog:** Bestätigungsabfrage vor Schreibzugriffen auf physische Datenträger.
+
+---
+
+## 6. Bauen, Testen & Benchmarking
 
 ```bash
 # Debug-/Entwicklungsbuild:
@@ -118,10 +130,10 @@ make all
 # Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
 make release
 
-# Erweiterte Regressionstest-Suite (24 Tests):
+# Erweiterte Regressionstest-Suite (26 Tests):
 make test
 
-# Vergleichende Performance-Benchmarks:
+# Vergleichende Performance-Benchmarks (13 Szenarien):
 make benchmark
 
 # Manpage einsehen:

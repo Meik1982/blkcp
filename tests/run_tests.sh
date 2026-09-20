@@ -243,4 +243,27 @@ assert len(data['sha256']) == 64
 "
 echo "Test 29 passed: Machine-readable NDJSON telemetry (--json and status=json)"
 
-echo "=== All 29 extended tests passed successfully! ==="
+# Test 30: Dynamic Ringbuffer Scaling and custom queue depth in io_async (--queue-depth)
+JSON_ASYNC=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_async_out.bin" -e async --queue-depth=16 -b 4K --json --hash 2>&1)
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_async_out.bin"
+python3 -c "
+import json, sys
+data = json.loads('''$JSON_ASYNC''')
+assert data['event'] == 'finished'
+assert data['copied_bytes'] == 123456
+assert data['pipeline']['capacity'] == 16
+assert 'reader_stalls' in data['pipeline']
+assert 'writer_stalls' in data['pipeline']
+"
+
+# Test 30b: Auto dynamic scaling for async ringbuffer (small blocksize -> scaled up to 128 slots)
+JSON_AUTO_ASYNC=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_auto_async_out.bin" -e async -b 4K --json 2>&1)
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_auto_async_out.bin"
+python3 -c "
+import json, sys
+data = json.loads('''$JSON_AUTO_ASYNC''')
+assert data['pipeline']['capacity'] == 128
+"
+echo "Test 30 passed: Dynamic Ringbuffer Scaling and custom queue depth in io_async (--queue-depth)"
+
+echo "=== All 30 extended tests passed successfully! ==="

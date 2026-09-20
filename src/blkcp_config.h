@@ -135,6 +135,7 @@ typedef struct dd_config
   int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */
   int status_level;               /**< Telemetry verbosity (none, noxfer, progress, json, default) */
   bool json_output;               /**< Emit machine-readable NDJSON telemetry */
+  size_t async_queue_depth;       /**< Ringbuffer queue capacity for async engine (0 = dynamic auto) */
   bool i_nocache;                 /**< Discard input cache after every block read */
   bool o_nocache;                 /**< Discard output cache after every block write */
   bool i_nocache_eof;             /**< Discard entire input cache at EOF */
@@ -156,6 +157,11 @@ typedef struct dd_stats
   xtime_t start_time;             /**< Transfer start timestamp (nanoseconds via TSC) */
   xtime_t next_time;              /**< Next scheduled periodic progress report time */
   int progress_len;               /**< Character length of last printed progress line */
+
+  /* Async pipeline telemetry (when engine == ENGINE_ASYNC) */
+  size_t async_capacity;          /**< Active ringbuffer capacity */
+  uint64_t async_reader_stalls;   /**< Reader waits due to full ringbuffer */
+  uint64_t async_writer_stalls;   /**< Writer waits due to empty ringbuffer */
 } dd_stats_t;
 
 /**

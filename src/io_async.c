@@ -32,7 +32,9 @@
 #include "io_driver.h"
 #include "io_engine_internal.h"
 
-#define ASYNC_QUEUE_CAPACITY 8
+#define ASYNC_MIN_CAPACITY 4
+#define ASYNC_MAX_CAPACITY 128
+#define ASYNC_TARGET_BUFFER_BYTES (32 * 1024 * 1024)
 
 /**
  * @brief Represents an individual slot in the circular ringbuffer.
@@ -57,10 +59,14 @@ typedef struct async_pipeline
   pthread_cond_t cond_not_full;
   pthread_cond_t cond_not_empty;
 
-  async_slot_t slots[ASYNC_QUEUE_CAPACITY];
+  async_slot_t *slots;    /**< Dynamically allocated circular slot array */
+  size_t capacity;        /**< Active queue depth capacity */
   size_t head;            /**< Consumer/writer read index */
   size_t tail;            /**< Producer/reader write index */
   size_t count;           /**< Number of filled slots ready to be written */
+
+  uint64_t reader_stalls; /**< Count of times reader paused because queue was full */
+  uint64_t writer_stalls; /**< Count of times writer starved because queue was empty */
 
   bool stop_requested;    /**< Flag set by writer to terminate reader */
   bool reader_done;       /**< Flag set by reader upon thread completion */
@@ -92,8 +98,11 @@ async_reader_worker (void *arg)
   while (true)
     {
       pthread_mutex_lock (&pipe->mutex);
-      while (pipe->count == ASYNC_QUEUE_CAPACITY && !pipe->stop_requested)
-        pthread_cond_wait (&pipe->cond_not_full, &pipe->mutex);
+      while (pipe->count == pipe->capacity && !pipe->stop_requested)
+        {
+          pipe->reader_stalls++;
+          pthread_cond_wait (&pipe->cond_not_full, &pipe->mutex);
+        }
 
       if (pipe->stop_requested)
         {
@@ -113,7 +122,7 @@ async_reader_worker (void *arg)
           slot->nread = 0;
 
           pthread_mutex_lock (&pipe->mutex);
-          pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+          pipe->tail = (pipe->tail + 1) % pipe->capacity;
           pipe->count++;
           pthread_cond_signal (&pipe->cond_not_empty);
           pthread_mutex_unlock (&pipe->mutex);
@@ -134,7 +143,7 @@ async_reader_worker (void *arg)
               slot->nread = 0;
 
               pthread_mutex_lock (&pipe->mutex);
-              pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+              pipe->tail = (pipe->tail + 1) % pipe->capacity;
               pipe->count++;
               pthread_cond_signal (&pipe->cond_not_empty);
               pthread_mutex_unlock (&pipe->mutex);
@@ -170,7 +179,7 @@ async_reader_worker (void *arg)
         }
 
       pthread_mutex_lock (&pipe->mutex);
-      pipe->tail = (pipe->tail + 1) % ASYNC_QUEUE_CAPACITY;
+      pipe->tail = (pipe->tail + 1) % pipe->capacity;
       pipe->count++;
       pthread_cond_signal (&pipe->cond_not_empty);
 
@@ -206,18 +215,79 @@ async_driver_init (dd_context_t *ctx, void **state)
   pthread_cond_init (&st->pipe.cond_not_full, NULL);
   pthread_cond_init (&st->pipe.cond_not_empty, NULL);
 
-  for (size_t i = 0; i < ASYNC_QUEUE_CAPACITY; i++)
+  /* Dynamic Ringbuffer Scaling: adapt capacity based on blocksize and target memory */
+  size_t capacity = ctx->cfg.async_queue_depth;
+  if (capacity == 0)
     {
-      st->pipe.slots[i].buf = alignalloc (ctx->page_size, ctx->cfg.input_blocksize);
-      if (!st->pipe.slots[i].buf)
-        xalloc_die ();
+      if (ctx->cfg.input_blocksize > 0)
+        capacity = (size_t) (ASYNC_TARGET_BUFFER_BYTES / ctx->cfg.input_blocksize);
+      else
+        capacity = 8;
+
+      if (capacity < ASYNC_MIN_CAPACITY)
+        capacity = ASYNC_MIN_CAPACITY;
+      if (capacity > ASYNC_MAX_CAPACITY)
+        capacity = ASYNC_MAX_CAPACITY;
+    }
+  else
+    {
+      if (capacity < 2)
+        capacity = 2;
+      if (capacity > 1024)
+        capacity = 1024;
     }
 
+  st->pipe.capacity = capacity;
+  st->pipe.slots = xcalloc (st->pipe.capacity, sizeof (async_slot_t));
+
+  /* Allocate aligned memory buffers with graceful fallback on memory pressure */
+  size_t allocated = 0;
+  while (true)
+    {
+      bool alloc_ok = true;
+      for (size_t i = 0; i < st->pipe.capacity; i++)
+        {
+          st->pipe.slots[i].buf = alignalloc (ctx->page_size, ctx->cfg.input_blocksize);
+          if (!st->pipe.slots[i].buf)
+            {
+              alloc_ok = false;
+              allocated = i;
+              break;
+            }
+        }
+
+      if (alloc_ok)
+        break;
+
+      /* Free any partially allocated slots */
+      for (size_t i = 0; i < allocated; i++)
+        {
+          alignfree (st->pipe.slots[i].buf);
+          st->pipe.slots[i].buf = NULL;
+        }
+
+      /* Graceful degradation: halve queue capacity down to 2 slots before failing */
+      if (st->pipe.capacity > 2)
+        {
+          st->pipe.capacity /= 2;
+          if (st->pipe.capacity < 2)
+            st->pipe.capacity = 2;
+        }
+      else
+        {
+          xalloc_die ();
+        }
+    }
+
+  ctx->stats.async_capacity = st->pipe.capacity;
   dd_alloc_obuf (ctx);
 
   if (pthread_create (&st->pipe.reader_tid, NULL, async_reader_worker, &st->pipe) != 0)
     {
       error (0, errno, _("failed to create async reader thread"));
+      for (size_t i = 0; i < st->pipe.capacity; i++)
+        alignfree (st->pipe.slots[i].buf);
+      free (st->pipe.slots);
       free (st);
       return EXIT_FAILURE;
     }
@@ -238,10 +308,15 @@ async_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
 
   pthread_mutex_lock (&pipe->mutex);
   while (pipe->count == 0 && !pipe->reader_done)
-    pthread_cond_wait (&pipe->cond_not_empty, &pipe->mutex);
+    {
+      pipe->writer_stalls++;
+      pthread_cond_wait (&pipe->cond_not_empty, &pipe->mutex);
+    }
 
   if (pipe->count == 0 && pipe->reader_done)
     {
+      ctx->stats.async_reader_stalls = pipe->reader_stalls;
+      ctx->stats.async_writer_stalls = pipe->writer_stalls;
       pthread_mutex_unlock (&pipe->mutex);
       *eof = true;
       return EXIT_SUCCESS;
@@ -296,7 +371,7 @@ async_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
 
   /* Release slot back to producer */
   pthread_mutex_lock (&pipe->mutex);
-  pipe->head = (pipe->head + 1) % ASYNC_QUEUE_CAPACITY;
+  pipe->head = (pipe->head + 1) % pipe->capacity;
   pipe->count--;
   pthread_cond_signal (&pipe->cond_not_full);
   pthread_mutex_unlock (&pipe->mutex);
@@ -340,12 +415,19 @@ async_driver_cleanup (dd_context_t *ctx, void *state)
   pthread_mutex_lock (&pipe->mutex);
   pipe->stop_requested = true;
   pthread_cond_signal (&pipe->cond_not_full);
+  ctx->stats.async_reader_stalls = pipe->reader_stalls;
+  ctx->stats.async_writer_stalls = pipe->writer_stalls;
   pthread_mutex_unlock (&pipe->mutex);
 
   pthread_join (pipe->reader_tid, NULL);
 
-  for (size_t i = 0; i < ASYNC_QUEUE_CAPACITY; i++)
-    alignfree (pipe->slots[i].buf);
+  for (size_t i = 0; i < pipe->capacity; i++)
+    {
+      if (pipe->slots[i].buf)
+        alignfree (pipe->slots[i].buf);
+    }
+  free (pipe->slots);
+  pipe->slots = NULL;
 
   pthread_mutex_destroy (&pipe->mutex);
   pthread_cond_destroy (&pipe->cond_not_full);

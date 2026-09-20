@@ -1,6 +1,7 @@
 #include <config.h>
 #include <stdio.h>
 #include <string.h>
+#include <inttypes.h>
 #include "stats.h"
 #include "system.h"
 #include "human.h"
@@ -168,12 +169,25 @@ dd_print_json_summary (const dd_stats_t *stats, const unsigned char *digest, boo
       hex[64] = '\0';
     }
 
+  char pipeline_buf[128];
+  if (stats->async_capacity > 0)
+    {
+      snprintf (pipeline_buf, sizeof pipeline_buf,
+                "{\"capacity\":%zu,\"reader_stalls\":%" PRIu64 ",\"writer_stalls\":%" PRIu64 "}",
+                stats->async_capacity, stats->async_reader_stalls, stats->async_writer_stalls);
+    }
+  else
+    {
+      snprintf (pipeline_buf, sizeof pipeline_buf, "null");
+    }
+
   fprintf (stderr,
-           "{\"event\":\"finished\",\"copied_bytes\":%jd,\"records_in\":{\"full\":%jd,\"partial\":%jd,\"truncated\":%jd},\"records_out\":{\"full\":%jd,\"partial\":%jd},\"elapsed_s\":%s,\"avg_speed_bps\":%s,\"sha256\":%s%s%s}\n",
+           "{\"event\":\"finished\",\"copied_bytes\":%jd,\"records_in\":{\"full\":%jd,\"partial\":%jd,\"truncated\":%jd},\"records_out\":{\"full\":%jd,\"partial\":%jd},\"elapsed_s\":%s,\"avg_speed_bps\":%s,\"pipeline\":%s,\"sha256\":%s%s%s}\n",
            stats->w_bytes,
            stats->r_full, stats->r_partial, stats->r_truncate,
            stats->w_full, stats->w_partial,
            delta_s_buf, speed_buf,
+           pipeline_buf,
            has_digest ? "\"" : "",
            has_digest ? hex : "null",
            has_digest ? "\"" : "");

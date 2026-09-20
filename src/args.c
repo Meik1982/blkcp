@@ -319,7 +319,8 @@ enum
   OPT_FSYNC,
   OPT_NOERROR,
   OPT_NOTRUNC,
-  OPT_JSON
+  OPT_JSON,
+  OPT_QUEUE_DEPTH
 };
 
 static struct option const modern_long_options[] =
@@ -335,6 +336,8 @@ static struct option const modern_long_options[] =
   {"engine", required_argument, NULL, 'e'},
   {"progress", no_argument, NULL, 'p'},
   {"json", no_argument, NULL, OPT_JSON},
+  {"queue-depth", required_argument, NULL, OPT_QUEUE_DEPTH},
+  {"async-queue", required_argument, NULL, OPT_QUEUE_DEPTH},
   {"quiet", no_argument, NULL, 'q'},
   {"force", no_argument, NULL, 'f'},
   {"autotune", no_argument, NULL, OPT_AUTOTUNE},
@@ -446,6 +449,17 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         case OPT_JSON:
           cfg->status_level = STATUS_JSON;
           cfg->json_output = true;
+          break;
+        case OPT_QUEUE_DEPTH:
+          {
+            strtol_error invalid = LONGINT_OK;
+            intmax_t qd = parse_integer (optarg, &invalid);
+            if (invalid != LONGINT_OK || qd < 2 || qd > 1024)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s (must be between 2 and 1024)",
+                     _("invalid queue depth"), quoteaf (optarg));
+            cfg->async_queue_depth = (size_t) qd;
+          }
           break;
         case 'q':
           cfg->status_level = STATUS_NONE;
@@ -589,6 +603,16 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
       else if (operand_is (name, "bs") && (operand_matches (val, "auto", 0) || operand_matches (val, "autotune", 0)))
         {
           cfg->conversions_mask |= C_AUTOTUNE;
+        }
+      else if (operand_is (name, "queue") || operand_is (name, "qdepth") || operand_is (name, "queue_depth"))
+        {
+          strtol_error invalid = LONGINT_OK;
+          intmax_t qd = parse_integer (val, &invalid);
+          if (invalid != LONGINT_OK || qd < 2 || qd > 1024)
+            error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                   "%s: %s (must be between 2 and 1024)",
+                   _("invalid queue depth"), quoteaf (val));
+          cfg->async_queue_depth = (size_t) qd;
         }
       else
         {

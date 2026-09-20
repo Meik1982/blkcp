@@ -58,6 +58,7 @@ src/
 * `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
 * `--hash`, `--sha256`: Berechnet on-the-fly die Streaming-SHA-256-Prüfsumme
 * `--autotune`: Dynamisches Durchsatz-Autotuning
+* `--queue-depth <N>`: Ringpuffer-Slotanzahl für die `async`-Engine (Standard: adaptive dynamische Skalierung)
 * `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
 * `--skip <SIZE>`: Offset am Eingang überspringen
 * `--seek <SIZE>`: Offset am Ausgang vor dem Schreiben anspringen
@@ -131,7 +132,7 @@ make all
 # Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
 make release
 
-# Erweiterte Regressionstest-Suite (29 Tests):
+# Erweiterte Regressionstest-Suite (30 Tests):
 make test
 
 # Vergleichende Performance-Benchmarks (13 Szenarien):

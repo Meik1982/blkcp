@@ -37,10 +37,14 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 - [x] **Maschinenlesbare JSON-Telemetrie (`--json`):**
   Optionale strukturierte NDJSON-Fortschrittsausgabe für Skripte und CI/CD-Pipelines (`{"event": "progress", ...}` und `{"event": "finished", ...}`) mit Bytes, Prozent, Geschwindigkeit, ETA und Prüfsumme auf `stderr`. In Regressionstest 29 verifiziert.
+- [x] **Dynamic Ringbuffer Scaling (`--queue-depth`):**
+  Adaptive Pufferanpassung im `io_async`-Treiber basierend auf Blockgröße und Ziel-Puffervolumen (32 MiB Working-Set, 4 bis 128 Slots). Manuelle Konfigurierbarkeit via `--queue-depth=N` / `--async-queue=N` (2 bis 1024 Slots), Graceful-Degradation-Fallback bei Speicherdruck und Erfassung von Reader-/Writer-Stalls in der NDJSON-Telemetrie. In Regressionstest 30 verifiziert.
 
 ---
 
 ## 2. Optionale zukünftige Erweiterungen
 
-- **Dynamic Ringbuffer Scaling:**
-  Adaptive Pufferanpassung im `io_async`-Treiber basierend auf NVMe/SSD Buslatenzen.
+- **Fixed-Buffer Pre-Registration (`io_uring`):**
+  Nutzung von `io_uring_register_buffers()` zur Eliminierung von Page-Pinning-Overheads bei wiederholten Übertragungszyklen.
+- **Adaptive I/O Splice Pipeline:**
+  Zero-Userspace-Kopieren für Pipes und FIFOs mittels `splice(2)` / `vmsplice(2)`.

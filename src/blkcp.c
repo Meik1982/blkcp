@@ -67,6 +67,7 @@ Core Options:\n\
   -c, --count=N            Copy only N input blocks\n\
   -p, --progress           Show periodic real-time transfer telemetry and speed\n\
       --json               Emit machine-readable NDJSON telemetry on stderr\n\
+      --queue-depth=N      Async ringbuffer queue depth (2..1024 slots; default: auto)\n\
   -q, --quiet              Suppress all output except fatal error messages\n\
   -f, --force              Override Target Safety Guard (e.g. write to mounted disks)\n\
       --hash, --sha256     Compute on-the-fly streaming SHA-256 checksum\n\

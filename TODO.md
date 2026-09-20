@@ -28,10 +28,11 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   `dd_swab_buffer()` in `src/conversions.c` via AVX2 `_mm256_shuffle_epi8` / SSSE3 `_mm_shuffle_epi8` vektorisiert (4-fach unrolled, 128 Bytes pro Iteration). Durchsatz stieg im Benchmark von 4,50 GB/s auf **13,50 GB/s (+200,0 %)**. In Regressionstest 27 mit 4-MB-Roundtrip verifiziert.
 - [x] **O_DIRECT Alignment- & Fallback-Härtung:**
   Logische und physische Sektorgrößenerkennung (`BLKSSZGET` / `BLKPBSZGET`) in `src/io_engine.c`. Resilientes Handling unaligned Teilblöcke am Dateiende unter `--direct` durch temporäres Dropping des Flags für den Tail-Block mit anschließendem Cache-Evict (`posix_fadvise(DONTNEED)`). Automatischer Fallback auf Cache-Eviction beim Öffnen, falls das Dateisystem `O_DIRECT` nicht unterstützt (z. B. OverlayFS / ältere tmpfs). In Regressionstest 28 verifiziert.
+- [x] **Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue):**
+  Vollständig asynchrones Pipelining in `src/io_uring.c`: Überlappen von Read-Ahead SQEs (Slot N+1) mit Write SQEs (Slot N) in einem einzigen gebatchten `io_uring_submit()`-Syscall. Zero-Syscall-Loop mit atomarem CQE-Reaping, strikter Byteziel-Begrenzung (`-l`), On-the-Fly SHA-256 Digest und Resilienz gegen `-EINTR`.
 
 ---
 
 ## 2. Nächste geplante Ausbaustufen
 
-### A. Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue)
-- **Ziel:** Überlappen von Read-SQE (Slot N+1) mit Write-SQE (Slot N) im Linux-Kernel, um Kontextwechsel noch weiter gegen 0 zu drücken.
+- Aktuell sind alle primären Ausbaustufen, Härtungen und Performance-Pipelines vollständig umgesetzt und in 28 Regressionstests sowie 14 Benchmarks verifiziert.

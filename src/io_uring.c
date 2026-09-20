@@ -3,11 +3,12 @@
  * @brief High-performance asynchronous I/O backend driver powered by Linux io_uring.
  *
  * Implements the dd_io_driver_t interface utilizing liburing for asynchronous,
- * zero-syscall-overhead block streaming between input and output descriptors.
+ * pipelined block streaming between input and output descriptors.
  * Features:
- * - Double-buffering queue pipeline with in-flight overlap of reads and writes.
+ * - Overlapped double-buffering pipeline: submits Read-Ahead (slot N+1) concurrently
+ *   with Write (slot N) in a single batched io_uring_submit() syscall.
  * - Resilient EINTR signal handling ensuring uninterrupted telemetry and SIGUSR1 stats.
- * - Dynamic fallback negotiation on systems without io_uring kernel support or restricted RLIMIT_MEMLOCK.
+ * - Dynamic fallback negotiation on systems without io_uring kernel support or restricted memory locks.
  * - Integration with central blkcp accounting, bounds checking, and streaming SHA-256 digest.
  */
 
@@ -40,6 +41,13 @@
 #define URING_QUEUE_DEPTH 64
 #define URING_NUM_BUFFERS 4
 
+enum uring_tag
+{
+  TAG_NONE = 0,
+  TAG_READ = 1,
+  TAG_WRITE = 2
+};
+
 /**
  * @brief Buffer slot state within the io_uring pipeline.
  */
@@ -48,8 +56,6 @@ typedef struct uring_buffer_slot
   char *buf;                    /**< Aligned data buffer */
   size_t capacity;              /**< Allocated buffer size */
   size_t length;                /**< Actual data bytes read */
-  off_t in_offset;              /**< File read offset */
-  off_t out_offset;             /**< File write offset */
 } uring_buffer_slot_t;
 
 /**
@@ -65,7 +71,14 @@ typedef struct uring_driver_state
   off_t out_file_pos;           /**< Current output seek offset */
   bool in_seekable;             /**< True if input supports positioned I/O */
   bool out_seekable;            /**< True if output supports positioned I/O */
-  int cur_slot;                 /**< Active slot index */
+
+  /* Pipelined execution state */
+  int read_slot;                /**< Slot currently reading or next to read */
+  int write_slot;               /**< Slot currently writing or next to write */
+  bool read_in_flight;          /**< True if an asynchronous read SQE is active */
+  bool write_in_flight;         /**< True if an asynchronous write SQE is active */
+  bool read_eof;                /**< True if input reached end-of-file */
+  bool pipeline_primed;         /**< True once initial read-ahead is submitted */
 } uring_driver_state_t;
 
 /**
@@ -85,7 +98,6 @@ uring_driver_init (dd_context_t *ctx, void **state)
   int ret = io_uring_queue_init (URING_QUEUE_DEPTH, &st->ring, 0);
   if (ret < 0)
     {
-      /* Return failure so io_engine can gracefully fallback to sync_io_driver */
       dd_diagnose (-ret, _("io_uring: initialization failed; falling back to synchronous driver"));
       free (st);
       return EXIT_FAILURE;
@@ -107,7 +119,7 @@ uring_driver_init (dd_context_t *ctx, void **state)
   else
     {
       st->in_seekable = false;
-      st->in_file_pos = -1;
+      st->in_file_pos = 0;
     }
 
   off_t cur_out = lseek (STDOUT_FILENO, 0, SEEK_CUR);
@@ -119,32 +131,58 @@ uring_driver_init (dd_context_t *ctx, void **state)
   else
     {
       st->out_seekable = false;
-      st->out_file_pos = -1;
+      st->out_file_pos = 0;
     }
 
-  /* Allocate aligned buffers for each slot */
+  /* Allocate page-aligned memory buffers for each slot in the ring pool */
   for (int i = 0; i < URING_NUM_BUFFERS; i++)
     {
       st->slots[i].capacity = st->slot_size;
-      ret = posix_memalign ((void **) &st->slots[i].buf, ctx->page_size, st->slot_size);
-      if (ret != 0 || !st->slots[i].buf)
+      st->slots[i].length = 0;
+      void *ptr = NULL;
+      if (posix_memalign (&ptr, ctx->page_size, st->slots[i].capacity) != 0 || !ptr)
         {
-          dd_diagnose (ret, _("io_uring: failed to allocate aligned buffer"));
+          dd_diagnose (errno, _("io_uring: failed to allocate aligned buffer for slot %d"), i);
           for (int j = 0; j < i; j++)
             free (st->slots[j].buf);
           io_uring_queue_exit (&st->ring);
           free (st);
           return EXIT_FAILURE;
         }
+      st->slots[i].buf = (char *) ptr;
     }
 
-  st->cur_slot = 0;
+  st->read_slot = 0;
+  st->write_slot = 0;
+  st->read_in_flight = false;
+  st->write_in_flight = false;
+  st->read_eof = false;
+  st->pipeline_primed = false;
+
   *state = st;
   return EXIT_SUCCESS;
 }
 
 /**
- * @brief Transfer a single block chunk using io_uring submission and completion queues.
+ * @brief Helper to compute the next read request size observing exact limits.
+ */
+static size_t
+get_next_read_size (dd_context_t const *ctx, size_t default_bs, off_t total_planned_bytes)
+{
+  size_t read_size = default_bs;
+  if (ctx->cfg.bytes_to_copy >= 0)
+    {
+      intmax_t remaining = ctx->cfg.bytes_to_copy - total_planned_bytes;
+      if (remaining <= 0)
+        return 0;
+      if ((uintmax_t) remaining < read_size)
+        read_size = (size_t) remaining;
+    }
+  return read_size;
+}
+
+/**
+ * @brief Transfer block chunks using a fully pipelined Read-Ahead / Write overlap.
  */
 static int
 uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
@@ -152,193 +190,253 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
   uring_driver_state_t *st = (uring_driver_state_t *) state;
   *fallback = false;
 
-  /* Calculate chunk size respecting exact byte limit */
-  size_t read_size = ctx->cfg.input_blocksize;
-  if (ctx->cfg.bytes_to_copy >= 0)
+  /* ------------------------------------------------------------- */
+  /* Phase 1: Pipeline Bootstrap (First Step Only)                 */
+  /* ------------------------------------------------------------- */
+  if (!st->pipeline_primed)
     {
-      intmax_t remaining = ctx->cfg.bytes_to_copy - ctx->stats.w_bytes;
-      if (remaining <= 0)
+      size_t first_read = get_next_read_size (ctx, ctx->cfg.input_blocksize, 0);
+      if (first_read == 0)
         {
           *eof = true;
           return EXIT_SUCCESS;
         }
-      if ((uintmax_t) remaining < read_size)
-        read_size = (size_t) remaining;
-    }
 
-  uring_buffer_slot_t *slot = &st->slots[st->cur_slot];
-
-  /* ------------------------------------------------------------- */
-  /* Step 1: Submit asynchronous read request                      */
-  /* ------------------------------------------------------------- */
-  struct io_uring_sqe *sqe = io_uring_get_sqe (&st->ring);
-  if (!sqe)
-    {
-      io_uring_submit (&st->ring);
-      sqe = io_uring_get_sqe (&st->ring);
+      struct io_uring_sqe *sqe = io_uring_get_sqe (&st->ring);
       if (!sqe)
         {
-          dd_diagnose (0, _("io_uring: SQE queue full"));
+          dd_diagnose (0, _("io_uring: SQE queue full on startup"));
+          return EXIT_FAILURE;
+        }
+
+      if (st->in_seekable)
+        io_uring_prep_read (sqe, STDIN_FILENO, st->slots[0].buf, first_read, st->in_file_pos);
+      else
+        io_uring_prep_read (sqe, STDIN_FILENO, st->slots[0].buf, first_read, -1);
+
+      sqe->user_data = TAG_READ;
+      st->read_in_flight = true;
+      st->read_slot = 0;
+      st->pipeline_primed = true;
+
+      int ret = io_uring_submit (&st->ring);
+      if (ret < 0 && ret != -EINTR)
+        {
+          dd_diagnose (-ret, _("io_uring: initial submission failed"));
           return EXIT_FAILURE;
         }
     }
 
-  if (st->in_seekable)
-    io_uring_prep_read (sqe, STDIN_FILENO, slot->buf, read_size, st->in_file_pos);
-  else
-    io_uring_prep_read (sqe, STDIN_FILENO, slot->buf, read_size, -1);
-
-  sqe->user_data = 1; /* Tag for READ */
-
-  int ret = io_uring_submit_and_wait (&st->ring, 1);
-  if (ret < 0 && ret != -EINTR)
+  /* ------------------------------------------------------------- */
+  /* Phase 2: Wait for in-flight completions (Read and/or Write)   */
+  /* ------------------------------------------------------------- */
+  while (st->read_in_flight || st->write_in_flight)
     {
-      dd_diagnose (-ret, _("io_uring: submission failed for read"));
-      return EXIT_FAILURE;
+      struct io_uring_cqe *cqe = NULL;
+      int ret = io_uring_wait_cqe (&st->ring, &cqe);
+      if (ret == -EINTR)
+        return EXIT_SUCCESS; /* Signal interrupt: yield to signal dispatcher */
+      if (ret < 0)
+        {
+          dd_diagnose (-ret, _("io_uring: wait_cqe failed"));
+          return EXIT_FAILURE;
+        }
+
+      uint64_t tag = cqe->user_data;
+      int res = cqe->res;
+      io_uring_cqe_seen (&st->ring, cqe);
+
+      if (tag == TAG_WRITE)
+        {
+          st->write_in_flight = false;
+          if (res < 0)
+            {
+              if (res == -EINTR || res == -EAGAIN)
+                continue;
+              dd_diagnose (-res, _("io_uring: write error on %s"), quoteaf (ctx->cfg.output_file));
+              return EXIT_FAILURE;
+            }
+
+          if (st->out_seekable)
+            st->out_file_pos += res;
+
+          ctx->stats.w_bytes += res;
+          if (ctx->cfg.output_blocksize > 0 && (size_t) res == (size_t) ctx->cfg.output_blocksize)
+            ctx->stats.w_full++;
+          else
+            ctx->stats.w_partial++;
+        }
+      else if (tag == TAG_READ)
+        {
+          st->read_in_flight = false;
+          if (res < 0)
+            {
+              if (res == -EINTR || res == -EAGAIN)
+                continue;
+              dd_diagnose (-res, _("io_uring: read error on %s"), quoteaf (ctx->cfg.input_file));
+              return EXIT_FAILURE;
+            }
+
+          if (res == 0)
+            {
+              st->read_eof = true;
+              st->slots[st->read_slot].length = 0;
+            }
+          else
+            {
+              st->slots[st->read_slot].length = (size_t) res;
+              if (st->in_seekable)
+                st->in_file_pos += res;
+
+              if (ctx->cfg.input_blocksize > 0 && (size_t) res == (size_t) ctx->cfg.input_blocksize)
+                ctx->stats.r_full++;
+              else
+                ctx->stats.r_partial++;
+            }
+        }
+
+      /* When both read and write are settled (or read finished and no write pending), proceed */
+      if (!st->write_in_flight && !st->read_in_flight)
+        break;
     }
 
-  /* Reap read CQE */
-  struct io_uring_cqe *cqe = NULL;
-  ret = io_uring_wait_cqe (&st->ring, &cqe);
-  if (ret == -EINTR)
+  /* ------------------------------------------------------------- */
+  /* Phase 3: EOF Termination Evaluation                           */
+  /* ------------------------------------------------------------- */
+  if (st->read_eof && st->slots[st->read_slot].length == 0)
     {
-      /* Interrupted by signal (e.g. SIGUSR1 or SIGINT) */
-      return EXIT_SUCCESS;
-    }
-  if (ret < 0)
-    {
-      dd_diagnose (-ret, _("io_uring: wait_cqe failed for read"));
-      return EXIT_FAILURE;
-    }
-
-  int bytes_read = cqe->res;
-  io_uring_cqe_seen (&st->ring, cqe);
-
-  if (bytes_read < 0)
-    {
-      /* Read error */
-      if (bytes_read == -EINTR || bytes_read == -EAGAIN)
-        return EXIT_SUCCESS;
-      dd_diagnose (-bytes_read, _("io_uring: read error on input %s"), quoteaf (ctx->cfg.input_file));
-      return EXIT_FAILURE;
-    }
-
-  if (bytes_read == 0)
-    {
-      /* EOF reached */
       *eof = true;
       return EXIT_SUCCESS;
     }
 
-  slot->length = (size_t) bytes_read;
-  if (st->in_seekable)
-    st->in_file_pos += bytes_read;
-
-  /* Update input statistics */
-  if (ctx->cfg.input_blocksize > 0 && slot->length == (size_t) ctx->cfg.input_blocksize)
-    ctx->stats.r_full++;
-  else
-    ctx->stats.r_partial++;
-
-  /* On-the-fly streaming SHA-256 calculation */
-  if (ctx->cfg.conversions_mask & C_SHA256)
-    sha256_process_bytes (slot->buf, slot->length, &ctx->sha_ctx);
-
   /* ------------------------------------------------------------- */
-  /* Step 2: Submit asynchronous write request                     */
+  /* Phase 4: Batched Overlapped Read-Ahead & Write Submission      */
   /* ------------------------------------------------------------- */
-  size_t bytes_to_write = slot->length;
-  size_t written_total = 0;
+  int cur_write_slot = st->read_slot;
+  size_t bytes_to_write = st->slots[cur_write_slot].length;
 
-  while (written_total < bytes_to_write)
+  if (ctx->cfg.bytes_to_copy >= 0)
     {
-      size_t chunk = bytes_to_write - written_total;
-      sqe = io_uring_get_sqe (&st->ring);
-      if (!sqe)
+      intmax_t max_allowed = ctx->cfg.bytes_to_copy - ctx->stats.w_bytes;
+      if (max_allowed <= 0)
         {
-          io_uring_submit (&st->ring);
-          sqe = io_uring_get_sqe (&st->ring);
-          if (!sqe)
-            {
-              dd_diagnose (0, _("io_uring: SQE queue full for write"));
-              return EXIT_FAILURE;
-            }
+          *eof = true;
+          return EXIT_SUCCESS;
         }
-
-      if (st->out_seekable)
-        io_uring_prep_write (sqe, STDOUT_FILENO, slot->buf + written_total, chunk, st->out_file_pos);
-      else
-        io_uring_prep_write (sqe, STDOUT_FILENO, slot->buf + written_total, chunk, -1);
-
-      sqe->user_data = 2; /* Tag for WRITE */
-
-      ret = io_uring_submit_and_wait (&st->ring, 1);
-      if (ret < 0 && ret != -EINTR)
-        {
-          dd_diagnose (-ret, _("io_uring: submission failed for write"));
-          return EXIT_FAILURE;
-        }
-
-      ret = io_uring_wait_cqe (&st->ring, &cqe);
-      if (ret == -EINTR)
-        continue;
-      if (ret < 0)
-        {
-          dd_diagnose (-ret, _("io_uring: wait_cqe failed for write"));
-          return EXIT_FAILURE;
-        }
-
-      int bytes_written = cqe->res;
-      io_uring_cqe_seen (&st->ring, cqe);
-
-      if (bytes_written < 0)
-        {
-          if (bytes_written == -EINTR || bytes_written == -EAGAIN)
-            continue;
-          dd_diagnose (-bytes_written, _("io_uring: write error on %s"), quoteaf (ctx->cfg.output_file));
-          return EXIT_FAILURE;
-        }
-
-      if (bytes_written == 0)
-        {
-          dd_diagnose (ENOSPC, _("io_uring: zero bytes written on %s"), quoteaf (ctx->cfg.output_file));
-          return EXIT_FAILURE;
-        }
-
-      written_total += bytes_written;
-      if (st->out_seekable)
-        st->out_file_pos += bytes_written;
-
-      ctx->stats.w_bytes += bytes_written;
+      if ((uintmax_t) max_allowed < bytes_to_write)
+        bytes_to_write = (size_t) max_allowed;
     }
 
-  /* Update output block accounting */
-  if (ctx->cfg.output_blocksize > 0 && written_total == (size_t) ctx->cfg.output_blocksize)
-    ctx->stats.w_full++;
-  else
-    ctx->stats.w_partial++;
+  /* Compute streaming SHA-256 for the exact written slice */
+  if ((ctx->cfg.conversions_mask & C_SHA256) && bytes_to_write > 0)
+    sha256_process_bytes (st->slots[cur_write_slot].buf, bytes_to_write, &ctx->sha_ctx);
 
-  /* Rotate buffer slot */
-  st->cur_slot = (st->cur_slot + 1) % URING_NUM_BUFFERS;
+  /* 1. Prepare Write SQE for completed read slot */
+  struct io_uring_sqe *sqe_w = io_uring_get_sqe (&st->ring);
+  if (!sqe_w)
+    {
+      io_uring_submit (&st->ring);
+      sqe_w = io_uring_get_sqe (&st->ring);
+      if (!sqe_w)
+        {
+          dd_diagnose (0, _("io_uring: SQE full for pipelined write"));
+          return EXIT_FAILURE;
+        }
+    }
+
+  if (st->out_seekable)
+    io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, st->out_file_pos);
+  else
+    io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, -1);
+
+  sqe_w->user_data = TAG_WRITE;
+  st->write_in_flight = true;
+  st->write_slot = cur_write_slot;
+
+  /* 2. Prepare Read-Ahead SQE for next buffer slot (if not EOF / limit reached) */
+  if (!st->read_eof)
+    {
+      off_t planned_bytes = ctx->stats.w_bytes + bytes_to_write;
+      size_t next_read_size = get_next_read_size (ctx, ctx->cfg.input_blocksize, planned_bytes);
+
+      if (next_read_size > 0)
+        {
+          int next_read_slot = (cur_write_slot + 1) % URING_NUM_BUFFERS;
+          struct io_uring_sqe *sqe_r = io_uring_get_sqe (&st->ring);
+          if (sqe_r)
+            {
+              if (st->in_seekable)
+                io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, st->in_file_pos);
+              else
+                io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, -1);
+
+              sqe_r->user_data = TAG_READ;
+              st->read_in_flight = true;
+              st->read_slot = next_read_slot;
+            }
+        }
+      else
+        {
+          st->read_eof = true;
+        }
+    }
+
+  /* 3. Submit both SQEs together in ONE single kernel syscall */
+  int ret = io_uring_submit (&st->ring);
+  if (ret < 0 && ret != -EINTR)
+    {
+      dd_diagnose (-ret, _("io_uring: pipelined submission failed"));
+      return EXIT_FAILURE;
+    }
 
   return EXIT_SUCCESS;
 }
 
 /**
- * @brief Flush any pending write requests.
+ * @brief Flush any remaining in-flight write operations.
  */
 static int
 uring_driver_flush (dd_context_t *ctx, void *state)
 {
-  (void) ctx;
   uring_driver_state_t *st = (uring_driver_state_t *) state;
-  if (st && st->ring_initialized)
-    io_uring_submit (&st->ring);
+  if (!st || !st->ring_initialized)
+    return EXIT_SUCCESS;
+
+  /* Wait for final in-flight write to land on disk */
+  while (st->write_in_flight)
+    {
+      struct io_uring_cqe *cqe = NULL;
+      int ret = io_uring_wait_cqe (&st->ring, &cqe);
+      if (ret == -EINTR)
+        continue;
+      if (ret < 0)
+        break;
+
+      uint64_t tag = cqe->user_data;
+      int res = cqe->res;
+      io_uring_cqe_seen (&st->ring, cqe);
+
+      if (tag == TAG_WRITE)
+        {
+          st->write_in_flight = false;
+          if (res > 0)
+            {
+              if (st->out_seekable)
+                st->out_file_pos += res;
+              ctx->stats.w_bytes += res;
+              if (ctx->cfg.output_blocksize > 0 && (size_t) res == (size_t) ctx->cfg.output_blocksize)
+                ctx->stats.w_full++;
+              else
+                ctx->stats.w_partial++;
+            }
+        }
+    }
+
   return EXIT_SUCCESS;
 }
 
 /**
- * @brief Clean up driver resources, free buffers, and exit ring.
+ * @brief Cleanup io_uring ring instance and free allocated slot buffers.
  */
 static void
 uring_driver_cleanup (dd_context_t *ctx, void *state)
@@ -348,24 +446,26 @@ uring_driver_cleanup (dd_context_t *ctx, void *state)
   if (!st)
     return;
 
+  if (st->ring_initialized)
+    {
+      io_uring_queue_exit (&st->ring);
+      st->ring_initialized = false;
+    }
+
   for (int i = 0; i < URING_NUM_BUFFERS; i++)
     {
       if (st->slots[i].buf)
-        free (st->slots[i].buf);
+        {
+          free (st->slots[i].buf);
+          st->slots[i].buf = NULL;
+        }
     }
-
-  if (st->ring_initialized)
-    io_uring_queue_exit (&st->ring);
 
   free (st);
 }
 
-/**
- * @brief Exported io_uring backend driver descriptor.
- */
-const dd_io_driver_t uring_io_driver =
-{
-  .name = "io_uring",
+const dd_io_driver_t uring_io_driver = {
+  .name = "uring",
   .init = uring_driver_init,
   .step = uring_driver_step,
   .flush = uring_driver_flush,

@@ -135,8 +135,8 @@ make release
 # Erweiterte Regressionstest-Suite (31 Tests):
 make test
 
-# Vergleichende Performance-Benchmarks (13 Szenarien):
-make benchmark
+# Vergleichende Performance-Benchmarks (15 Szenarien):
+./tests/benchmark_compare.sh
 
 # Manpage einsehen:
 make man

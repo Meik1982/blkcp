@@ -381,8 +381,8 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
 {
   idx_t total_written = 0;
 
-  if ((ctx->cfg.conversions_mask & C_SHA256) && size > 0)
-    sha256_process_bytes (buf, size, &ctx->sha_ctx);
+  if ((ctx->cfg.conversions_mask & C_SHA256) && size > 0 && ctx->sha_evp_ctx)
+    EVP_DigestUpdate (ctx->sha_evp_ctx, buf, (size_t) size);
 
   if ((ctx->cfg.conversions_mask & C_SPARSE) && is_nul (buf, size))
     {
@@ -720,7 +720,11 @@ dd_copy (dd_context_t *ctx)
     return exit_status;
 
   if (ctx->cfg.conversions_mask & C_SHA256)
-    sha256_init_ctx (&ctx->sha_ctx);
+    {
+      ctx->sha_evp_ctx = EVP_MD_CTX_new ();
+      if (ctx->sha_evp_ctx)
+        EVP_DigestInit_ex (ctx->sha_evp_ctx, EVP_sha256 (), NULL);
+    }
 
   /* Select and initialize backend driver */
   const dd_io_driver_t *driver = dd_select_io_driver (ctx);
@@ -782,7 +786,13 @@ dd_copy (dd_context_t *ctx)
   /* Finalize SHA-256 digest if active */
   if (ctx->cfg.conversions_mask & C_SHA256)
     {
-      sha256_finish_ctx (&ctx->sha_ctx, ctx->sha_digest);
+      if (ctx->sha_evp_ctx)
+        {
+          unsigned int digest_len = 0;
+          EVP_DigestFinal_ex (ctx->sha_evp_ctx, ctx->sha_digest, &digest_len);
+          EVP_MD_CTX_free (ctx->sha_evp_ctx);
+          ctx->sha_evp_ctx = NULL;
+        }
       ctx->sha_computed = true;
     }
 

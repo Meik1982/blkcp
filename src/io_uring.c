@@ -343,8 +343,8 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
     }
 
   /* Compute streaming SHA-256 for the exact written slice */
-  if ((ctx->cfg.conversions_mask & C_SHA256) && bytes_to_write > 0)
-    sha256_process_bytes (st->slots[cur_write_slot].buf, bytes_to_write, &ctx->sha_ctx);
+  if ((ctx->cfg.conversions_mask & C_SHA256) && bytes_to_write > 0 && ctx->sha_evp_ctx)
+    EVP_DigestUpdate (ctx->sha_evp_ctx, st->slots[cur_write_slot].buf, bytes_to_write);
 
   /* 1. Prepare Write SQE for completed read slot */
   struct io_uring_sqe *sqe_w = io_uring_get_sqe (&st->ring);

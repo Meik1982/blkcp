@@ -7,10 +7,10 @@
 #include <sys/types.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <openssl/evp.h>
 #include "system.h"
 #include "idx.h"
 #include "xtime.h"
-#include "sha256.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -212,8 +212,8 @@ typedef struct dd_context
   /* Dynamic function pointers */
   ssize_t (*iread_fnc) (int fd, char *buf, idx_t size); /**< Custom reader routine */
 
-  /* On-the-fly checksumming state */
-  struct sha256_ctx sha_ctx;      /**< Streaming SHA-256 computation state */
+  /* On-the-fly checksumming state (Hardware-accelerated OpenSSL EVP) */
+  EVP_MD_CTX *sha_evp_ctx;        /**< Streaming EVP SHA-256 computation state */
   unsigned char sha_digest[32];   /**< Final 256-bit binary hash digest */
   bool sha_computed;              /**< Set to true when hash computation finalized */
 

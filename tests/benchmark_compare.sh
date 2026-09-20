@@ -210,5 +210,11 @@ run_custom_test "13. io_uring Engine (-e uring)" \
 run_test "14. Byte Swap conv=swab (2GB)" \
   if=/dev/zero of=/dev/null bs=64k count=30000 conv=swab status=progress
 
+# Test 15: In-Kernel Zero-Copy Splice Engine (-e splice vs standard sync)
+run_custom_test "15. Kernel Splice (-e splice)" \
+  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_splice.bin" bs=1M status=progress \
+  VS \
+  -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_splice.bin" -b 1M -e splice -p
+
 echo "======================================================================"
 echo "Benchmark completed successfully."

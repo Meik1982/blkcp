@@ -30,9 +30,14 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   Logische und physische Sektorgrößenerkennung (`BLKSSZGET` / `BLKPBSZGET`) in `src/io_engine.c`. Resilientes Handling unaligned Teilblöcke am Dateiende unter `--direct` durch temporäres Dropping des Flags für den Tail-Block mit anschließendem Cache-Evict (`posix_fadvise(DONTNEED)`). Automatischer Fallback auf Cache-Eviction beim Öffnen, falls das Dateisystem `O_DIRECT` nicht unterstützt (z. B. OverlayFS / ältere tmpfs). In Regressionstest 28 verifiziert.
 - [x] **Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue):**
   Vollständig asynchrones Pipelining in `src/io_uring.c`: Überlappen von Read-Ahead SQEs (Slot N+1) mit Write SQEs (Slot N) in einem einzigen gebatchten `io_uring_submit()`-Syscall. Zero-Syscall-Loop mit atomarem CQE-Reaping, strikter Byteziel-Begrenzung (`-l`), On-the-Fly SHA-256 Digest und Resilienz gegen `-EINTR`.
+- [x] **Auto-Engine-Heuristik & Shell-Autovervollständigung:**
+  Dynamische Backend-Auswahl unter `ENGINE_AUTO` (priorisiert `reflink` für CoW-Klone und `uring` für Blockgeräte und `--direct`). Vollwertige Autocompletion-Skripte für Bash (`completions/bash/blkcp`) und Zsh (`completions/zsh/_blkcp`) inklusive `make install`/`uninstall` Targets.
+- [x] **Hardware-beschleunigtes Streaming-Hashing (SHA-256):**
+  Direkte Integration von hardwarebeschleunigtem OpenSSL SHA-256 (SHA-NI / AVX2) in `src/io_engine.c` und `src/io_uring.c` mit nativer Anzeige in `blkcp-tui`.
 
 ---
 
-## 2. Nächste geplante Ausbaustufen
+## 2. Optionale zukünftige Erweiterungen
 
-- Aktuell sind alle primären Ausbaustufen, Härtungen und Performance-Pipelines vollständig umgesetzt und in 28 Regressionstests sowie 14 Benchmarks verifiziert.
+- **Maschinenlesbare JSON-Telemetrie (`--json`):**
+  Optionale strukturierte Fortschrittsausgabe für Skripte und CI/CD-Pipelines (`{"bytes": N, "speed": X, "eta": Y}`).

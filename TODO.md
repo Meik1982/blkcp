@@ -35,9 +35,12 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Hardware-beschleunigtes Streaming-Hashing (SHA-256):**
   Direkte Integration von hardwarebeschleunigtem OpenSSL SHA-256 (SHA-NI / AVX2) in `src/io_engine.c` und `src/io_uring.c` mit nativer Anzeige in `blkcp-tui`.
 
+- [x] **Maschinenlesbare JSON-Telemetrie (`--json`):**
+  Optionale strukturierte NDJSON-Fortschrittsausgabe für Skripte und CI/CD-Pipelines (`{"event": "progress", ...}` und `{"event": "finished", ...}`) mit Bytes, Prozent, Geschwindigkeit, ETA und Prüfsumme auf `stderr`. In Regressionstest 29 verifiziert.
+
 ---
 
 ## 2. Optionale zukünftige Erweiterungen
 
-- **Maschinenlesbare JSON-Telemetrie (`--json`):**
-  Optionale strukturierte Fortschrittsausgabe für Skripte und CI/CD-Pipelines (`{"bytes": N, "speed": X, "eta": Y}`).
+- **Dynamic Ringbuffer Scaling:**
+  Adaptive Pufferanpassung im `io_async`-Treiber basierend auf NVMe/SSD Buslatenzen.

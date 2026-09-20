@@ -41,6 +41,7 @@ _arguments -s -S \
     '--sync[Zero-pad short blocks to input block size]' \
     '(-f --force)'{-f,--force}'[Override Target Safety Guard for mounted devices]' \
     '(-p --progress)'{-p,--progress}'[Display real-time interactive telemetry]' \
+    '--json[Emit machine-readable NDJSON telemetry on stderr]' \
     '(-q --quiet)'{-q,--quiet}'[Suppress all diagnostic telemetry and progress]' \
     '(-h --help)'{-h,--help}'[Display usage summary and exit]' \
     '(-v --version)'{-v,--version}'[Display version information and exit]' \

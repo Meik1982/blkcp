@@ -103,7 +103,7 @@ dd_process_signals (dd_context_t *ctx)
         dd_cleanup ();
 
       if (ctx)
-        dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+        dd_print_stats (ctx);
 
       if (interrupt)
         raise (interrupt);

@@ -229,4 +229,18 @@ $BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_direct_uring.bin" 
 cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_direct_uring.bin"
 echo "Test 28 passed: Direct I/O (--direct) unaligned tail handling and bit-exactness"
 
-echo "=== All 28 extended tests passed successfully! ==="
+# Test 29: Machine-readable NDJSON telemetry (--json and status=json)
+JSON_OUT=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_json_out.bin" --json --hash 2>&1)
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_json_out.bin"
+python3 -c "
+import json, sys
+data = json.loads('''$JSON_OUT''')
+assert data['event'] == 'finished'
+assert data['copied_bytes'] == 123456
+assert data['records_in']['full'] >= 0
+assert 'avg_speed_bps' in data
+assert len(data['sha256']) == 64
+"
+echo "Test 29 passed: Machine-readable NDJSON telemetry (--json and status=json)"
+
+echo "=== All 29 extended tests passed successfully! ==="

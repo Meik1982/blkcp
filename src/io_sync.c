@@ -258,7 +258,7 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
 
       if (ctx->cfg.conversions_mask & C_NOERROR)
         {
-          dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
+          dd_print_stats (ctx);
           idx_t bad_portion = ctx->cfg.input_blocksize - st->partread;
           dd_invalidate_cache (STDIN_FILENO, bad_portion);
           if ((ctx->cfg.conversions_mask & C_SYNC) && !st->partread)

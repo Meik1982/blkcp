@@ -81,48 +81,171 @@ dd_print_xfer_stats (const dd_stats_t *stats, int *progress_len, xtime_t progres
     fputc ('\n', stderr);
 }
 
-void
-dd_check_progress (dd_stats_t *stats, int status_level)
+static void
+format_json_double (char *buf, size_t sz, double val, int decimals)
 {
-  if (status_level != STATUS_PROGRESS)
-    return;
-
-  xtime_t now = gethrxtime ();
-  if (now >= stats->next_time)
+  snprintf (buf, sz, "%.*f", decimals, val);
+  for (char *p = buf; *p; p++)
     {
-      dd_print_xfer_stats (stats, &stats->progress_len, now);
-      stats->next_time = now + XTIME_PRECISION;
+      if (*p == ',')
+        *p = '.';
     }
 }
 
 void
-dd_print_stats (const dd_stats_t *stats, int status_level, int *progress_len)
+dd_print_json_progress (const dd_stats_t *stats, intmax_t total_bytes, xtime_t progress_time)
 {
-  if (status_level == STATUS_NONE)
-    return;
+  xtime_t now = progress_time ? progress_time : gethrxtime ();
+  double delta_s = 0.0;
+  double speed_bps = 0.0;
 
-  if (progress_len && 0 < *progress_len)
+  if (stats->start_time < now)
     {
-      fputc ('\n', stderr);
-      *progress_len = 0;
+      xtime_t delta_xtime = now - stats->start_time;
+      delta_s = (double) delta_xtime / (double) XTIME_PRECISION;
+      if (delta_s > 0.000001)
+        speed_bps = (double) stats->w_bytes / delta_s;
+    }
+
+  char delta_s_buf[32];
+  char speed_buf[32];
+  format_json_double (delta_s_buf, sizeof delta_s_buf, delta_s, 2);
+  format_json_double (speed_buf, sizeof speed_buf, speed_bps, 0);
+
+  if (total_bytes > 0)
+    {
+      double pct = ((double) stats->w_bytes * 100.0) / (double) total_bytes;
+      if (pct > 100.0)
+        pct = 100.0;
+
+      double eta_s = 0.0;
+      if (speed_bps > 0.0 && stats->w_bytes < total_bytes)
+        eta_s = (double) (total_bytes - stats->w_bytes) / speed_bps;
+
+      char pct_buf[32];
+      char eta_s_buf[32];
+      format_json_double (pct_buf, sizeof pct_buf, pct, 2);
+      format_json_double (eta_s_buf, sizeof eta_s_buf, eta_s, 1);
+
+      fprintf (stderr,
+               "{\"event\":\"progress\",\"copied_bytes\":%jd,\"total_bytes\":%jd,\"percent\":%s,\"speed_bps\":%s,\"elapsed_s\":%s,\"eta_s\":%s}\n",
+               stats->w_bytes, total_bytes, pct_buf, speed_buf, delta_s_buf, eta_s_buf);
+    }
+  else
+    {
+      fprintf (stderr,
+               "{\"event\":\"progress\",\"copied_bytes\":%jd,\"total_bytes\":null,\"percent\":null,\"speed_bps\":%s,\"elapsed_s\":%s,\"eta_s\":null}\n",
+               stats->w_bytes, speed_buf, delta_s_buf);
+    }
+  fflush (stderr);
+}
+
+void
+dd_print_json_summary (const dd_stats_t *stats, const unsigned char *digest, bool has_digest)
+{
+  xtime_t now = gethrxtime ();
+  double delta_s = 0.0;
+  double speed_bps = 0.0;
+
+  if (stats->start_time < now)
+    {
+      xtime_t delta_xtime = now - stats->start_time;
+      delta_s = (double) delta_xtime / (double) XTIME_PRECISION;
+      if (delta_s > 0.000001)
+        speed_bps = (double) stats->w_bytes / delta_s;
+    }
+
+  char delta_s_buf[32];
+  char speed_buf[32];
+  format_json_double (delta_s_buf, sizeof delta_s_buf, delta_s, 4);
+  format_json_double (speed_buf, sizeof speed_buf, speed_bps, 0);
+
+  char hex[65];
+  if (has_digest && digest)
+    {
+      for (int i = 0; i < 32; i++)
+        sprintf (hex + i * 2, "%02x", digest[i]);
+      hex[64] = '\0';
     }
 
   fprintf (stderr,
-           _("%jd+%jd records in\n"
-             "%jd+%jd records out\n"),
-           stats->r_full, stats->r_partial, stats->w_full, stats->w_partial);
+           "{\"event\":\"finished\",\"copied_bytes\":%jd,\"records_in\":{\"full\":%jd,\"partial\":%jd,\"truncated\":%jd},\"records_out\":{\"full\":%jd,\"partial\":%jd},\"elapsed_s\":%s,\"avg_speed_bps\":%s,\"sha256\":%s%s%s}\n",
+           stats->w_bytes,
+           stats->r_full, stats->r_partial, stats->r_truncate,
+           stats->w_full, stats->w_partial,
+           delta_s_buf, speed_buf,
+           has_digest ? "\"" : "",
+           has_digest ? hex : "null",
+           has_digest ? "\"" : "");
+  fflush (stderr);
+}
 
-  if (stats->r_truncate != 0)
-    fprintf (stderr,
-             ngettext ("%jd truncated record\n",
-                       "%jd truncated records\n",
-                       select_plural (stats->r_truncate)),
-             stats->r_truncate);
-
-  if (status_level == STATUS_NOXFER)
+void
+dd_check_progress (dd_context_t *ctx)
+{
+  if (!ctx)
     return;
 
-  dd_print_xfer_stats (stats, progress_len, 0);
+  bool is_json = (ctx->cfg.json_output || ctx->cfg.status_level == STATUS_JSON);
+  bool is_text_progress = (ctx->cfg.status_level == STATUS_PROGRESS && !is_json);
+
+  if (!is_json && !is_text_progress)
+    return;
+
+  xtime_t now = gethrxtime ();
+  if (now >= ctx->stats.next_time)
+    {
+      if (is_json)
+        {
+          intmax_t total = ctx->cfg.bytes_to_copy > 0 ? ctx->cfg.bytes_to_copy : ctx->total_input_size;
+          dd_print_json_progress (&ctx->stats, total, now);
+        }
+      else
+        {
+          dd_print_xfer_stats (&ctx->stats, &ctx->stats.progress_len, now);
+        }
+      ctx->stats.next_time = now + XTIME_PRECISION;
+    }
+}
+
+void
+dd_print_stats (const dd_context_t *ctx)
+{
+  if (!ctx)
+    return;
+
+  if (ctx->cfg.json_output || ctx->cfg.status_level == STATUS_JSON)
+    {
+      dd_print_json_summary (&ctx->stats, ctx->sha_digest, ctx->sha_computed);
+      return;
+    }
+
+  if (ctx->cfg.status_level != STATUS_NONE)
+    {
+      if (ctx->stats.progress_len > 0)
+        {
+          fputc ('\n', stderr);
+          ((dd_context_t *) ctx)->stats.progress_len = 0;
+        }
+
+      fprintf (stderr,
+               _("%jd+%jd records in\n"
+                 "%jd+%jd records out\n"),
+               ctx->stats.r_full, ctx->stats.r_partial, ctx->stats.w_full, ctx->stats.w_partial);
+
+      if (ctx->stats.r_truncate != 0)
+        fprintf (stderr,
+                 ngettext ("%jd truncated record\n",
+                           "%jd truncated records\n",
+                           select_plural (ctx->stats.r_truncate)),
+                 ctx->stats.r_truncate);
+
+      if (ctx->cfg.status_level != STATUS_NOXFER)
+        dd_print_xfer_stats (&ctx->stats, NULL, 0);
+    }
+
+  if (ctx->sha_computed)
+    dd_print_hash (ctx->sha_digest);
 }
 
 void

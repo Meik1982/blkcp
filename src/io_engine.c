@@ -443,7 +443,7 @@ dd_write_output (dd_context_t *ctx)
       ctx->stats.w_full++;
     }
   ctx->oc = 0;
-  dd_check_progress (&ctx->stats, ctx->cfg.status_level);
+  dd_check_progress (ctx);
 }
 
 void
@@ -471,7 +471,7 @@ dd_copy_simple (dd_context_t *ctx, char const *buf, idx_t nbytes)
         {
           ctx->stats.w_full++;
         }
-      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
+      dd_check_progress (ctx);
       return;
     }
 
@@ -755,7 +755,7 @@ dd_copy (dd_context_t *ctx)
         }
 
       /* Single point of truth for interactive live telemetry */
-      dd_check_progress (&ctx->stats, ctx->cfg.status_level);
+      dd_check_progress (ctx);
     }
 
   /* Flush pending buffers and release driver resources */
@@ -803,6 +803,22 @@ setup_input_stream (dd_context_t *ctx)
 #endif
             error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.input_file));
         }
+    }
+
+  ctx->total_input_size = -1;
+  struct stat st;
+  if (fstat (STDIN_FILENO, &st) == 0)
+    {
+      if (S_ISREG (st.st_mode))
+        ctx->total_input_size = st.st_size;
+#if defined __linux__ && defined BLKGETSIZE64
+      else if (S_ISBLK (st.st_mode))
+        {
+          uint64_t bytes = 0;
+          if (ioctl (STDIN_FILENO, BLKGETSIZE64, &bytes) == 0 && bytes > 0)
+            ctx->total_input_size = (intmax_t) bytes;
+        }
+#endif
     }
 
   off_t offset = lseek (STDIN_FILENO, 0, SEEK_CUR);
@@ -942,9 +958,7 @@ dd_execute (dd_context_t *ctx)
     dd_invalidate_cache (STDOUT_FILENO, 0);
 
   dd_engine_cleanup (ctx);
-  dd_print_stats (&ctx->stats, ctx->cfg.status_level, &ctx->stats.progress_len);
-  if (ctx->sha_computed)
-    dd_print_hash (ctx->sha_digest);
+  dd_print_stats (ctx);
 
   active_ctx = NULL;
   return status;

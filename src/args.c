@@ -91,6 +91,7 @@ static struct symbol_value const statuses[] =
   {"none", STATUS_NONE},
   {"noxfer", STATUS_NOXFER},
   {"progress", STATUS_PROGRESS},
+  {"json", STATUS_JSON},
   {"", 0}
 };
 
@@ -317,7 +318,8 @@ enum
   OPT_FDATASYNC,
   OPT_FSYNC,
   OPT_NOERROR,
-  OPT_NOTRUNC
+  OPT_NOTRUNC,
+  OPT_JSON
 };
 
 static struct option const modern_long_options[] =
@@ -332,6 +334,7 @@ static struct option const modern_long_options[] =
   {"count", required_argument, NULL, 'c'},
   {"engine", required_argument, NULL, 'e'},
   {"progress", no_argument, NULL, 'p'},
+  {"json", no_argument, NULL, OPT_JSON},
   {"quiet", no_argument, NULL, 'q'},
   {"force", no_argument, NULL, 'f'},
   {"autotune", no_argument, NULL, OPT_AUTOTUNE},
@@ -440,6 +443,10 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         case 'p':
           cfg->status_level = STATUS_PROGRESS;
           break;
+        case OPT_JSON:
+          cfg->status_level = STATUS_JSON;
+          cfg->json_output = true;
+          break;
         case 'q':
           cfg->status_level = STATUS_NONE;
           break;
@@ -541,8 +548,12 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         cfg->output_flags |= parse_symbols (val, flags, false,
                                            N_("invalid output flag"));
       else if (operand_is (name, "status"))
-        cfg->status_level = parse_symbols (val, statuses, true,
-                                          N_("invalid status level"));
+        {
+          cfg->status_level = parse_symbols (val, statuses, true,
+                                            N_("invalid status level"));
+          if (cfg->status_level == STATUS_JSON)
+            cfg->json_output = true;
+        }
       else if (operand_is (name, "opt"))
         {
           char *opts = xstrdup (val);

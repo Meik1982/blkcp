@@ -22,7 +22,8 @@ enum dd_status_level
   STATUS_NONE = 1,
   STATUS_NOXFER = 2,
   STATUS_DEFAULT = 3,
-  STATUS_PROGRESS = 4
+  STATUS_PROGRESS = 4,
+  STATUS_JSON = 5
 };
 
 /* Conversion flags */
@@ -132,7 +133,8 @@ typedef struct dd_config
   int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
   int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
   int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */
-  int status_level;               /**< Telemetry verbosity (none, noxfer, progress, default) */
+  int status_level;               /**< Telemetry verbosity (none, noxfer, progress, json, default) */
+  bool json_output;               /**< Emit machine-readable NDJSON telemetry */
   bool i_nocache;                 /**< Discard input cache after every block read */
   bool o_nocache;                 /**< Discard output cache after every block write */
   bool i_nocache_eof;             /**< Discard entire input cache at EOF */
@@ -206,6 +208,9 @@ typedef struct dd_context
   struct sha256_ctx sha_ctx;      /**< Streaming SHA-256 computation state */
   unsigned char sha_digest[32];   /**< Final 256-bit binary hash digest */
   bool sha_computed;              /**< Set to true when hash computation finalized */
+
+  /* Estimated or measured total input size for progress/ETA */
+  intmax_t total_input_size;      /**< Source size in bytes (-1 if unknown/pipe) */
 } dd_context_t;
 
 /* Global or thread-local active context pointer for signal handling */

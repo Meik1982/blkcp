@@ -53,6 +53,7 @@ src/
 * `-l, --limit <SIZE>` (auch `-s, --size`): Exakte Byte-Begrenzung entkoppelt von Blockgrößen
 * `-c, --count <N>`: Anzahl der zu kopierenden Blöcke
 * `-p, --progress`: Echtzeit-Durchsatzanzeige und Fortschrittsbalken
+* `--json`: Maschinenlesbare NDJSON-Telemetrie auf `stderr` für CI/CD und Automatisierung
 * `-q, --quiet`: Stiller Modus (nur fatale Fehlermeldungen)
 * `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
 * `--hash`, `--sha256`: Berechnet on-the-fly die Streaming-SHA-256-Prüfsumme
@@ -130,7 +131,7 @@ make all
 # Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
 make release
 
-# Erweiterte Regressionstest-Suite (26 Tests):
+# Erweiterte Regressionstest-Suite (29 Tests):
 make test
 
 # Vergleichende Performance-Benchmarks (13 Szenarien):

@@ -218,4 +218,15 @@ $BLKCP_BIN -i "$TMP_DIR/rand_swab_pass1.bin" -o "$TMP_DIR/rand_swab_pass2.bin" -
 cmp "$TMP_DIR/rand_swab_orig.bin" "$TMP_DIR/rand_swab_pass2.bin"
 echo "Test 27 passed: SIMD AVX2-accelerated conv=swab 4MB roundtrip bit-exactness"
 
-echo "=== All 27 extended tests passed successfully! ==="
+# Test 28: Direct I/O (--direct) with unaligned byte size across sync and io_uring
+head -c 123456 /dev/urandom > "$TMP_DIR/rand_direct_in.bin"
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_direct_sync.bin" --direct -b 64K -q
+[[ $(stat -c %s "$TMP_DIR/rand_direct_sync.bin") -eq 123456 ]]
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_direct_sync.bin"
+
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_direct_uring.bin" --direct -e uring -b 64K -q
+[[ $(stat -c %s "$TMP_DIR/rand_direct_uring.bin") -eq 123456 ]]
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_direct_uring.bin"
+echo "Test 28 passed: Direct I/O (--direct) unaligned tail handling and bit-exactness"
+
+echo "=== All 28 extended tests passed successfully! ==="

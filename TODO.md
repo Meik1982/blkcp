@@ -26,13 +26,12 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   26/26 Regressionstests grün (`make test`), 13 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`.
 - [x] **SIMD-Vektorisierung für Endian-Byte-Swapping (`swab`):**
   `dd_swab_buffer()` in `src/conversions.c` via AVX2 `_mm256_shuffle_epi8` / SSSE3 `_mm_shuffle_epi8` vektorisiert (4-fach unrolled, 128 Bytes pro Iteration). Durchsatz stieg im Benchmark von 4,50 GB/s auf **13,50 GB/s (+200,0 %)**. In Regressionstest 27 mit 4-MB-Roundtrip verifiziert.
+- [x] **O_DIRECT Alignment- & Fallback-Härtung:**
+  Logische und physische Sektorgrößenerkennung (`BLKSSZGET` / `BLKPBSZGET`) in `src/io_engine.c`. Resilientes Handling unaligned Teilblöcke am Dateiende unter `--direct` durch temporäres Dropping des Flags für den Tail-Block mit anschließendem Cache-Evict (`posix_fadvise(DONTNEED)`). Automatischer Fallback auf Cache-Eviction beim Öffnen, falls das Dateisystem `O_DIRECT` nicht unterstützt (z. B. OverlayFS / ältere tmpfs). In Regressionstest 28 verifiziert.
 
 ---
 
 ## 2. Nächste geplante Ausbaustufen
 
-### A. O_DIRECT Memory & Offset Auto-Alignment Guard
-- **Ziel:** Automatische Erkennung fehlausgerichteter Puffer oder Offsets bei `--direct` und transparenter Fallback / Sektor-Padding, um `EINVAL` auf NVMe 4Kn-Laufwerken proaktiv abzufangen.
-
-### C. Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue)
+### A. Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue)
 - **Ziel:** Überlappen von Read-SQE (Slot N+1) mit Write-SQE (Slot N) im Linux-Kernel, um Kontextwechsel noch weiter gegen 0 zu drücken.

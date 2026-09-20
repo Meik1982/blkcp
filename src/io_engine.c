@@ -74,6 +74,34 @@ dd_diagnose (int errnum, char const *fmt, ...)
 /*                           Hardware & Device Helpers                        */
 /* -------------------------------------------------------------------------- */
 
+#if defined __linux__
+# ifndef BLKSSZGET
+#  define BLKSSZGET _IO(0x12,104)
+# endif
+# ifndef BLKPBSZGET
+#  define BLKPBSZGET _IO(0x12,123)
+# endif
+#endif
+
+idx_t
+dd_detect_sector_size (int fd)
+{
+  struct stat st;
+  if (fstat (fd, &st) != 0)
+    return 512;
+
+#if defined __linux__ && defined BLKSSZGET
+  if (S_ISBLK (st.st_mode))
+    {
+      unsigned int logical_sector = 0;
+      if (ioctl (fd, BLKSSZGET, &logical_sector) == 0 && logical_sector > 0)
+        return logical_sector;
+    }
+#endif
+
+  return 512;
+}
+
 idx_t
 dd_detect_optimal_blocksize (int fd)
 {
@@ -305,8 +333,27 @@ dd_iread (int fd, char *buf, idx_t size)
   while (true)
     {
       ssize_t ret = read (fd, buf, size);
-      if (ret < 0 && errno == EINTR)
-        continue;
+      if (ret < 0)
+        {
+          if (errno == EINTR)
+            continue;
+#if defined __linux__ && defined O_DIRECT
+          if (errno == EINVAL)
+            {
+              int cur_flags = fcntl (fd, F_GETFL);
+              if (cur_flags >= 0 && (cur_flags & O_DIRECT))
+                {
+                  /* Drop O_DIRECT for unaligned tail or unsupported read */
+                  fcntl (fd, F_SETFL, cur_flags & ~O_DIRECT);
+                  ret = read (fd, buf, size);
+                  if (ret > 0)
+                    dd_invalidate_cache (fd, ret);
+                  fcntl (fd, F_SETFL, cur_flags);
+                  return ret;
+                }
+            }
+#endif
+        }
       return ret;
     }
 }
@@ -351,6 +398,27 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
         {
           if (errno == EINTR)
             continue;
+#if defined __linux__ && defined O_DIRECT
+          if (errno == EINVAL && (ctx->cfg.output_flags & O_DIRECT))
+            {
+              /* O_DIRECT alignment trap: unaligned partial trailing block */
+              int cur_flags = fcntl (fd, F_GETFL);
+              if (cur_flags >= 0 && (cur_flags & O_DIRECT))
+                {
+                  /* Drop O_DIRECT for this unaligned tail write */
+                  fcntl (fd, F_SETFL, cur_flags & ~O_DIRECT);
+                  nwritten = write (fd, buf + total_written, size - total_written);
+                  if (nwritten > 0)
+                    dd_invalidate_cache (fd, nwritten);
+                  fcntl (fd, F_SETFL, cur_flags);
+                  if (nwritten > 0)
+                    {
+                      total_written += nwritten;
+                      continue;
+                    }
+                }
+            }
+#endif
           break;
         }
       total_written += nwritten;
@@ -706,7 +774,22 @@ setup_input_stream (dd_context_t *ctx)
   else
     {
       if (ifd_reopen (STDIN_FILENO, ctx->cfg.input_file, O_RDONLY | ctx->cfg.input_flags, 0) < 0)
-        error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.input_file));
+        {
+#if defined __linux__ && defined O_DIRECT
+          if (errno == EINVAL && (ctx->cfg.input_flags & O_DIRECT))
+            {
+              /* Filesystem does not support O_DIRECT (e.g. tmpfs). Transparent fallback to cache eviction */
+              ctx->cfg.input_flags &= ~O_DIRECT;
+              ctx->cfg.i_nocache = true;
+              if (ifd_reopen (STDIN_FILENO, ctx->cfg.input_file, O_RDONLY | ctx->cfg.input_flags, 0) < 0)
+                error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.input_file));
+              if (ctx->cfg.status_level != STATUS_NONE)
+                error (0, 0, _("warning: '%s' does not support direct I/O; falling back to cache eviction"), quoteaf (ctx->cfg.input_file));
+            }
+          else
+#endif
+            error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.input_file));
+        }
     }
 
   off_t offset = lseek (STDIN_FILENO, 0, SEEK_CUR);
@@ -740,7 +823,23 @@ setup_output_stream (dd_context_t *ctx)
 #endif
 
       if (ofd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_WRONLY | opts, perms) < 0)
-        error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.output_file));
+        {
+#if defined __linux__ && defined O_DIRECT
+          if (errno == EINVAL && (opts & O_DIRECT))
+            {
+              /* Filesystem does not support O_DIRECT (e.g. tmpfs). Transparent fallback to cache eviction */
+              opts &= ~O_DIRECT;
+              ctx->cfg.output_flags &= ~O_DIRECT;
+              ctx->cfg.o_nocache = true;
+              if (ofd_reopen (STDOUT_FILENO, ctx->cfg.output_file, O_WRONLY | opts, perms) < 0)
+                error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.output_file));
+              if (ctx->cfg.status_level != STATUS_NONE)
+                error (0, 0, _("warning: '%s' does not support direct I/O; falling back to cache eviction"), quoteaf (ctx->cfg.output_file));
+            }
+          else
+#endif
+            error (EXIT_FAILURE, errno, _("failed to open %s"), quoteaf (ctx->cfg.output_file));
+        }
     }
 
 #if HAVE_POSIX_FADVISE

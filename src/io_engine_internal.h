@@ -68,12 +68,9 @@ void dd_invalidate_cache (int fd, off_t len);
 /* Hardware blocksize detection */
 idx_t dd_detect_optimal_blocksize (int fd);
 
-/* Low-level conversion & writing copiers */
+/* Low-level writing copiers */
 void dd_write_output (dd_context_t *ctx);
-void dd_output_char (dd_context_t *ctx, char c);
 void dd_copy_simple (dd_context_t *ctx, char const *buf, idx_t nbytes);
-void dd_copy_with_block (dd_context_t *ctx, char const *buf, idx_t nbytes);
-void dd_copy_with_unblock (dd_context_t *ctx, char const *buf, idx_t nbytes);
 
 #ifdef __cplusplus
 }

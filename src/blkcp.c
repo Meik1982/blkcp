@@ -1,3 +1,11 @@
+/**
+ * @file blkcp.c
+ * @brief Next-Gen Block Copy Tool (blkcp) - Main Entry Point.
+ *
+ * Implements program startup, signal initialization, argument processing,
+ * and invocation of the unified I/O engine.
+ */
+
 #include <config.h>
 #include <sys/types.h>
 #include <signal.h>
@@ -20,11 +28,7 @@
 #include "io_engine.h"
 
 #define PROGRAM_NAME "blkcp"
-#define AUTHORS \
-  proper_name ("Meik"), \
-  proper_name ("Paul Rubin"), \
-  proper_name ("David MacKenzie"), \
-  proper_name ("Stuart Kemp")
+#define AUTHORS proper_name ("Meik")
 
 static bool close_stdout_required = true;
 
@@ -55,7 +59,7 @@ Next-Gen Block Copy Tool (blkcp) for fast, safe and modern stream/disk replicati
 Core Options:\n\
   -i, --input=FILE         Input file or block device (default: stdin)\n\
   -o, --output=FILE        Output file or block device (default: stdout)\n\
-  -b, --block-size=SIZE    Block size for transfer (e.g. 64K, 4M, 1G);\n\
+  -b, --block-size=SIZE    Block size for transfer (e.g. 64K, 4M, 1G, 1MiB);\n\
                            use '-b auto' or '--autotune' for dynamic I/O tuning\n\
   -e, --engine=NAME        Execution backend engine:\n\
                              'sync'     Classic synchronous block I/O\n\
@@ -77,6 +81,7 @@ Core Options:\n\
       --skip=BYTES         Skip BYTES at input before copying\n\
       --seek=BYTES         Seek BYTES at output before writing\n\
       --sparse             Punch holes / create sparse file for blocks of zeros\n\
+      --swab               Swap adjacent byte pairs (AVX2/SSSE3-accelerated)\n\
       --sync               Pad short reads with zero bytes\n\
       --notrunc            Do not truncate the output file\n\
       --noerror            Continue operation across read errors\n\
@@ -84,8 +89,9 @@ Core Options:\n\
       --fsync              Flush output data and metadata before completion\n\
 \n\
 Multiplicative Suffixes (SI / IEC):\n\
-  c=1, w=2, b=512, kB=1000, K=1024, MB=1000*1000, M=1024*1024,\n\
-  GB=1000^3, G=1024^3, T, P, E, Z, Y, KiB, MiB, GiB, TiB.\n\
+  K=1024, M=1024*1024, G=1024^3, T=1024^4,\n\
+  KiB=1024, MiB=1024*1024, GiB=1024^3, TiB=1024^4,\n\
+  kB=1000, MB=1000*1000, GB=1000^3, TB=1000^4.\n\
 \n\
 Sending SIGUSR1 to a running blkcp process prints instantaneous transfer\n\
 statistics to stderr and continues execution.\n\
@@ -116,23 +122,12 @@ main (int argc, char **argv)
   ctx.page_size = getpagesize ();
   close_stdout_required = false;
 
-  dd_init_translations (ctx.trans_table);
   dd_init_default_config (&ctx.cfg);
-  ctx.newline_character = '\n';
-  ctx.space_character = ' ';
-  ctx.pending_spaces = 0;
 
   bool use_fullblock = false;
   dd_scanargs (argc, argv, &ctx.cfg, &ctx.warn_partial_read, &use_fullblock);
   if (use_fullblock)
     ctx.iread_fnc = dd_iread_fullblock;
-
-  dd_apply_translations (ctx.trans_table,
-                         ctx.cfg.conversions_mask,
-                         &ctx.newline_character,
-                         &ctx.space_character,
-                         &ctx.translation_needed,
-                         &ctx.trans_mode);
 
   int exit_status = dd_execute (&ctx);
 

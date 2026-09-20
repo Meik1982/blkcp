@@ -34,7 +34,7 @@
 
 #define ASYNC_MIN_CAPACITY 4
 #define ASYNC_MAX_CAPACITY 128
-#define ASYNC_TARGET_BUFFER_BYTES (32 * 1024 * 1024)
+#define ASYNC_TARGET_BUFFER_BYTES ((size_t) 32 * 1024 * 1024)
 
 /**
  * @brief Represents an individual slot in the circular ringbuffer.
@@ -342,32 +342,16 @@ async_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
   else
     ctx->stats.r_partial++;
 
-  /* Translation handling */
-  if (ctx->translation_needed)
+  idx_t nwritten = dd_iwrite (ctx, STDOUT_FILENO, slot->buf, slot->nread);
+  ctx->stats.w_bytes += nwritten;
+  if (nwritten != slot->nread)
     {
-      if (ctx->trans_mode == TRANS_MODE_FAST_UCASE)
-        dd_vector_ucase (slot->buf, slot->nread);
-      else if (ctx->trans_mode == TRANS_MODE_FAST_LCASE)
-        dd_vector_lcase (slot->buf, slot->nread);
-      else
-        dd_translate_buffer (ctx->trans_table, slot->buf, slot->nread);
+      diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
+      if (nwritten != 0)
+        ctx->stats.w_partial++;
+      return EXIT_FAILURE;
     }
-
-  if (ctx->translation_needed)
-    dd_copy_simple (ctx, slot->buf, slot->nread);
-  else
-    {
-      idx_t nwritten = dd_iwrite (ctx, STDOUT_FILENO, slot->buf, slot->nread);
-      ctx->stats.w_bytes += nwritten;
-      if (nwritten != slot->nread)
-        {
-          diagnose (errno, _("error writing %s"), quoteaf (ctx->cfg.output_file));
-          if (nwritten != 0)
-            ctx->stats.w_partial++;
-          return EXIT_FAILURE;
-        }
-      ctx->stats.w_full++;
-    }
+  ctx->stats.w_full++;
 
   /* Release slot back to producer */
   pthread_mutex_lock (&pipe->mutex);

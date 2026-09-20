@@ -79,9 +79,7 @@ static int
 splice_driver_init (dd_context_t *ctx, void **state)
 {
   /* Disallow conversions that mutate data in userspace */
-  const int incompatible_conv = C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK
-                              | C_LCASE | C_UCASE | C_SWAB | C_SYNC | C_SHA256
-                              | C_SPARSE;
+  const int incompatible_conv = C_SWAB | C_SYNC | C_SHA256 | C_SPARSE;
 
   if (ctx->cfg.conversions_mask & incompatible_conv)
     return EXIT_FAILURE;

@@ -244,11 +244,14 @@ dd_alloc_ibuf (dd_context_t *ctx)
   if (ctx->cfg.conversions_mask & C_AUTOTUNE)
     {
       /* Ensure buffer accommodates the maximum autotune stage (4 MiB) */
-      if (bs < 4 * 1024 * 1024)
-        bs = 4 * 1024 * 1024;
+      if (bs < (idx_t) 4 * 1024 * 1024)
+        bs = (idx_t) 4 * 1024 * 1024;
     }
 
-  idx_t alloc_size = bs + ctx->cfg.conversion_blocksize + 2;
+  idx_t alloc_size = bs + 2;
+  if (ctx->page_size > 0 && (alloc_size % ctx->page_size) != 0)
+    alloc_size = ((alloc_size + ctx->page_size - 1) / ctx->page_size) * ctx->page_size;
+
   ctx->ibuf = alignalloc (ctx->page_size, alloc_size);
   if (!ctx->ibuf)
     xalloc_die ();
@@ -263,13 +266,15 @@ dd_alloc_obuf (dd_context_t *ctx)
   idx_t bs = ctx->cfg.output_blocksize;
   if (ctx->cfg.conversions_mask & C_AUTOTUNE)
     {
-      if (bs < 4 * 1024 * 1024)
-        bs = 4 * 1024 * 1024;
+      if (bs < (idx_t) 4 * 1024 * 1024)
+        bs = (idx_t) 4 * 1024 * 1024;
     }
 
-  if (ctx->cfg.conversions_mask & (C_BLOCK | C_UNBLOCK | C_SWAB))
+  if (ctx->cfg.conversions_mask & C_SWAB)
     {
-      idx_t alloc_size = bs + ctx->cfg.conversion_blocksize + 2;
+      idx_t alloc_size = bs + 2;
+      if (ctx->page_size > 0 && (alloc_size % ctx->page_size) != 0)
+        alloc_size = ((alloc_size + ctx->page_size - 1) / ctx->page_size) * ctx->page_size;
       ctx->obuf = alignalloc (ctx->page_size, alloc_size);
     }
   else if (ctx->cfg.input_blocksize == ctx->cfg.output_blocksize && ctx->ibuf)
@@ -279,7 +284,10 @@ dd_alloc_obuf (dd_context_t *ctx)
     }
   else
     {
-      ctx->obuf = alignalloc (ctx->page_size, bs);
+      idx_t alloc_size = bs;
+      if (ctx->page_size > 0 && (alloc_size % ctx->page_size) != 0)
+        alloc_size = ((alloc_size + ctx->page_size - 1) / ctx->page_size) * ctx->page_size;
+      ctx->obuf = alignalloc (ctx->page_size, alloc_size);
     }
 
   if (!ctx->obuf)
@@ -447,14 +455,6 @@ dd_write_output (dd_context_t *ctx)
 }
 
 void
-dd_output_char (dd_context_t *ctx, char c)
-{
-  ctx->obuf[ctx->oc++] = c;
-  if (ctx->oc >= ctx->cfg.output_blocksize)
-    dd_write_output (ctx);
-}
-
-void
 dd_copy_simple (dd_context_t *ctx, char const *buf, idx_t nbytes)
 {
   if (ctx->oc == 0 && nbytes == ctx->cfg.output_blocksize)
@@ -491,61 +491,6 @@ dd_copy_simple (dd_context_t *ctx, char const *buf, idx_t nbytes)
     }
 }
 
-void
-dd_copy_with_block (dd_context_t *ctx, char const *buf, idx_t nbytes)
-{
-  for (idx_t i = 0; i < nbytes; i++)
-    {
-      char c = buf[i];
-      if (c == ctx->newline_character)
-        {
-          for (idx_t j = ctx->col; j < ctx->cfg.conversion_blocksize; j++)
-            dd_output_char (ctx, ctx->space_character);
-          ctx->col = 0;
-        }
-      else
-        {
-          if (ctx->col == ctx->cfg.conversion_blocksize)
-            {
-              ctx->stats.r_truncate++;
-              continue;
-            }
-          dd_output_char (ctx, c);
-          ctx->col++;
-        }
-    }
-}
-
-void
-dd_copy_with_unblock (dd_context_t *ctx, char const *buf, idx_t nbytes)
-{
-  for (idx_t i = 0; i < nbytes; i++)
-    {
-      char c = buf[i];
-      if (ctx->col++ < ctx->cfg.conversion_blocksize)
-        {
-          if (c == ctx->space_character)
-            ctx->pending_spaces++;
-          else
-            {
-              while (ctx->pending_spaces > 0)
-                {
-                  dd_output_char (ctx, ctx->space_character);
-                  ctx->pending_spaces--;
-                }
-              dd_output_char (ctx, c);
-            }
-        }
-      else
-        {
-          ctx->col = 0;
-          ctx->pending_spaces = 0;
-          dd_output_char (ctx, ctx->newline_character);
-          i--;
-        }
-    }
-}
-
 /* -------------------------------------------------------------------------- */
 /*                           Driver Selection & Orchestration                 */
 /* -------------------------------------------------------------------------- */
@@ -577,9 +522,7 @@ dd_select_io_driver (dd_context_t *ctx)
 
 #if defined __linux__
   /* 5. Opportunistic zero-copy reflink via copy_file_range when engine == ENGINE_AUTO */
-  const int incompatible = C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK
-                         | C_LCASE | C_UCASE | C_SWAB | C_SYNC | C_SHA256
-                         | C_SPARSE | C_AUTOTUNE;
+  const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_SPARSE | C_AUTOTUNE;
   if (!(ctx->cfg.conversions_mask & incompatible)
       && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
       && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
@@ -593,7 +536,7 @@ dd_select_io_driver (dd_context_t *ctx)
 
   /* 6. Opportunistic io_uring pipeline when engine == ENGINE_AUTO */
   /* If either stream is a block device or direct I/O is requested */
-  if (!(ctx->cfg.conversions_mask & (C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK | C_LCASE | C_UCASE | C_SWAB | C_AUTOTUNE)))
+  if (!(ctx->cfg.conversions_mask & (C_SWAB | C_AUTOTUNE)))
     {
       struct stat st_in, st_out;
       bool is_in_blk = (fstat (STDIN_FILENO, &st_in) == 0 && S_ISBLK (st_in.st_mode));

@@ -42,6 +42,7 @@ _arguments -s -S \
     '--async-queue=[Alias for --queue-depth]:depth:' \
     '--sparse[Punch sparse holes for NUL-byte blocks]' \
     '--sync[Zero-pad short blocks to input block size]' \
+    '--swab[Swap adjacent byte pairs via SIMD AVX2]' \
     '(-f --force)'{-f,--force}'[Override Target Safety Guard for mounted devices]' \
     '(-p --progress)'{-p,--progress}'[Display real-time interactive telemetry]' \
     '--json[Emit machine-readable NDJSON telemetry on stderr]' \

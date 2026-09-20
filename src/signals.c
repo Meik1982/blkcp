@@ -46,7 +46,7 @@ dd_install_signal_handlers (void)
   sigemptyset (&dd_caught_signals);
   if (catch_siginfo)
     sigaddset (&dd_caught_signals, SIGINFO);
-  sigaction (SIGINT, nullptr, &act);
+  sigaction (SIGINT, NULL, &act);
   if (act.sa_handler != SIG_IGN)
     sigaddset (&dd_caught_signals, SIGINT);
   act.sa_mask = dd_caught_signals;
@@ -55,14 +55,14 @@ dd_install_signal_handlers (void)
     {
       act.sa_handler = siginfo_handler;
       act.sa_flags = 0;
-      sigaction (SIGINFO, &act, nullptr);
+      sigaction (SIGINFO, &act, NULL);
     }
 
   if (sigismember (&dd_caught_signals, SIGINT))
     {
       act.sa_handler = interrupt_handler;
       act.sa_flags = SA_NODEFER | SA_RESETHAND;
-      sigaction (SIGINT, &act, nullptr);
+      sigaction (SIGINT, &act, NULL);
     }
 #else
   if (catch_siginfo)
@@ -97,7 +97,7 @@ dd_process_signals (dd_context_t *ctx)
       if (infos)
         dd_info_signal_count = infos - 1;
 
-      sigprocmask (SIG_SETMASK, &oldset, nullptr);
+      sigprocmask (SIG_SETMASK, &oldset, NULL);
 
       if (interrupt)
         dd_cleanup ();

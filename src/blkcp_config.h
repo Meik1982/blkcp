@@ -26,33 +26,25 @@ enum dd_status_level
   STATUS_JSON = 5
 };
 
-/* Conversion flags */
+/* Conversion and operational flags */
 enum dd_conversions
 {
-  C_ASCII = 000001,
-  C_EBCDIC = 000002,
-  C_IBM = 000004,
-  C_BLOCK = 000010,
-  C_UNBLOCK = 000020,
-  C_LCASE = 000040,
-  C_UCASE = 000100,
-  C_SWAB = 000200,
-  C_NOERROR = 000400,
-  C_NOTRUNC = 001000,
-  C_SYNC = 002000,
-  C_TWOBUFS = 004000,
-  C_NOCREAT = 010000,
-  C_EXCL = 020000,
-  C_FDATASYNC = 040000,
-  C_FSYNC = 0100000,
-  C_SPARSE = 0200000,
-  C_AUTOTUNE = 0400000,
-  C_FORCE = 01000000,
-  C_SHA256 = 02000000,
-  C_ASYNC = 04000000,
-  C_REFLINK = 010000000,
-  C_URING = 020000000,
-  C_SPLICE = 040000000
+  C_SWAB        = 1 << 0,   /**< Byte-pair swapping (AVX2/SSSE3-accelerated) */
+  C_NOERROR     = 1 << 1,   /**< Continue operation across read errors */
+  C_NOTRUNC     = 1 << 2,   /**< Do not truncate output file */
+  C_SYNC        = 1 << 3,   /**< Pad short reads with zero bytes */
+  C_FDATASYNC   = 1 << 4,   /**< fdatasync output before completion */
+  C_FSYNC       = 1 << 5,   /**< fsync output before completion */
+  C_SPARSE      = 1 << 6,   /**< Detect zero blocks and create sparse file */
+  C_AUTOTUNE    = 1 << 7,   /**< Dynamic blocksize autotuning */
+  C_FORCE       = 1 << 8,   /**< Bypass safety guard */
+  C_SHA256      = 1 << 9,   /**< Real-time streaming SHA-256 calculation */
+  C_ASYNC       = 1 << 10,  /**< Pthread double-buffering pipeline */
+  C_REFLINK     = 1 << 11,  /**< CoW copy_file_range */
+  C_URING       = 1 << 12,  /**< io_uring asynchronous backend */
+  C_SPLICE      = 1 << 13,  /**< splice zero-copy pipe backend */
+  C_NOCREAT     = 1 << 14,  /**< Do not create output file if missing */
+  C_EXCL        = 1 << 15   /**< Fail if output file already exists */
 };
 
 /**
@@ -121,16 +113,15 @@ typedef struct dd_config
 {
   char const *input_file;         /**< Path to input file or device (NULL for stdin) */
   char const *output_file;        /**< Path to output file or device (NULL for stdout) */
-  idx_t input_blocksize;          /**< Block size for read operations (ibs) */
-  idx_t output_blocksize;         /**< Block size for write operations (obs) */
-  idx_t conversion_blocksize;     /**< Record length for block/unblock conversion (cbs) */
+  idx_t input_blocksize;          /**< Block size for read operations */
+  idx_t output_blocksize;         /**< Block size for write operations */
   intmax_t skip_records;          /**< Input blocks to skip before copying */
-  idx_t skip_bytes;               /**< Additional bytes to skip when iflag=skip_bytes */
+  idx_t skip_bytes;               /**< Additional bytes to skip */
   intmax_t seek_records;          /**< Output blocks to seek before writing */
-  intmax_t seek_bytes;            /**< Additional bytes to seek when oflag=seek_bytes */
-  intmax_t max_records;           /**< Max records to copy (from count=N) */
-  idx_t max_bytes;                /**< Remaining bytes to copy when iflag=count_bytes */
-  intmax_t bytes_to_copy;         /**< Exact byte count limit (bytes=N, tocopy=N, tc=N; -1 = unbounded) */
+  intmax_t seek_bytes;            /**< Additional bytes to seek */
+  intmax_t max_records;           /**< Max records to copy (from -c / --count) */
+  idx_t max_bytes;                /**< Remaining bytes to copy */
+  intmax_t bytes_to_copy;         /**< Exact byte count limit (-l / --limit; -1 = unbounded) */
   blkcp_engine_t engine;          /**< Explicitly chosen I/O execution backend engine */
   int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
   int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
@@ -151,7 +142,7 @@ typedef struct dd_stats
 {
   intmax_t r_full;                /**< Complete input blocks read */
   intmax_t r_partial;             /**< Partial input blocks read */
-  intmax_t r_truncate;            /**< Records truncated by cbs limit */
+  intmax_t r_truncate;            /**< Unused placeholder */
   intmax_t w_full;                /**< Complete output blocks written */
   intmax_t w_partial;             /**< Partial output blocks written */
   intmax_t w_bytes;               /**< Cumulative bytes written to output */
@@ -167,17 +158,6 @@ typedef struct dd_stats
 } dd_stats_t;
 
 /**
- * @brief Translation execution modes for optimized character transformation
- */
-enum dd_trans_mode
-{
-  TRANS_MODE_NONE = 0,            /**< No translation needed */
-  TRANS_MODE_TABLE,               /**< Standard 256-byte lookup table translation */
-  TRANS_MODE_FAST_UCASE,          /**< Branchless SIMD-vectorized ASCII upper-casing */
-  TRANS_MODE_FAST_LCASE           /**< Branchless SIMD-vectorized ASCII lower-casing */
-};
-
-/**
  * @brief Complete reentrant runtime context for execution, state, and signals
  */
 typedef struct dd_context
@@ -190,7 +170,6 @@ typedef struct dd_context
   char *ibuf;                     /**< Input read buffer (aligned via alignalloc) */
   char *obuf;                     /**< Output write buffer (shares ibuf on fast path) */
   idx_t oc;                       /**< Current byte count accumulated in obuf */
-  idx_t col;                      /**< Current column index for block/unblock conversion */
 
   /* I/O descriptors and status */
   bool input_seekable;            /**< True if input supports lseek(SEEK_CUR) */
@@ -198,12 +177,6 @@ typedef struct dd_context
   off_t input_offset;             /**< Byte offset in input file */
   bool final_op_was_seek;         /**< True if last write was sparse lseek forward */
   bool warn_partial_read;         /**< Warn on short reads before EOF */
-  bool translation_needed;        /**< True if character translation is active */
-  int trans_mode;                 /**< Active transformation mode (enum dd_trans_mode) */
-  char newline_character;         /**< Active newline character representation */
-  char space_character;           /**< Active space character representation */
-  unsigned char trans_table[256]; /**< Reentrant 256-byte charset translation table */
-  idx_t pending_spaces;           /**< State tracker for unblock space expansion */
 
   /* Signal state */
   sig_atomic_t volatile interrupt_signal; /**< SIGINT/SIGTERM cancellation flag */

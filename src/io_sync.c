@@ -278,8 +278,7 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
       if (ctx->cfg.conversions_mask & C_SYNC)
         {
           if (!(ctx->cfg.conversions_mask & C_NOERROR))
-            memset (ctx->ibuf + n_bytes_read,
-                    (ctx->cfg.conversions_mask & (C_BLOCK | C_UNBLOCK)) ? ' ' : '\0',
+            memset (ctx->ibuf + n_bytes_read, '\0',
                     ctx->cfg.input_blocksize - n_bytes_read);
           n_bytes_read = ctx->cfg.input_blocksize;
         }
@@ -288,16 +287,6 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
     {
       ctx->stats.r_full++;
       st->partread = 0;
-    }
-
-  if (ctx->translation_needed)
-    {
-      if (ctx->trans_mode == TRANS_MODE_FAST_UCASE)
-        dd_vector_ucase (ctx->ibuf, n_bytes_read);
-      else if (ctx->trans_mode == TRANS_MODE_FAST_LCASE)
-        dd_vector_lcase (ctx->ibuf, n_bytes_read);
-      else
-        dd_translate_buffer (ctx->trans_table, ctx->ibuf, n_bytes_read);
     }
 
   /* Matching block size fast path */
@@ -326,12 +315,7 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
   else
     bufstart = ctx->ibuf;
 
-  if (ctx->cfg.conversions_mask & C_BLOCK)
-    dd_copy_with_block (ctx, bufstart, n_bytes_read);
-  else if (ctx->cfg.conversions_mask & C_UNBLOCK)
-    dd_copy_with_unblock (ctx, bufstart, n_bytes_read);
-  else
-    dd_copy_simple (ctx, bufstart, n_bytes_read);
+  dd_copy_simple (ctx, bufstart, n_bytes_read);
 
   if (st->at.active)
     autotune_sample_tick (ctx, &st->at);
@@ -348,24 +332,8 @@ sync_driver_flush (dd_context_t *ctx, void *state)
   sync_driver_state_t *st = (sync_driver_state_t *) state;
   if (0 <= st->saved_byte)
     {
-      char saved_char = st->saved_byte;
-      if (ctx->cfg.conversions_mask & C_BLOCK)
-        dd_copy_with_block (ctx, &saved_char, 1);
-      else if (ctx->cfg.conversions_mask & C_UNBLOCK)
-        dd_copy_with_unblock (ctx, &saved_char, 1);
-      else
-        dd_copy_simple (ctx, &saved_char, 1);
-    }
-
-  if (ctx->col && (ctx->cfg.conversions_mask & C_BLOCK))
-    {
-      for (idx_t j = ctx->col; j < ctx->cfg.conversion_blocksize; j++)
-        dd_output_char (ctx, ctx->space_character);
-    }
-
-  if (ctx->col && (ctx->cfg.conversions_mask & C_UNBLOCK))
-    {
-      dd_output_char (ctx, ctx->newline_character);
+      char saved_char = (char) st->saved_byte;
+      dd_copy_simple (ctx, &saved_char, 1);
     }
 
   if (ctx->oc > 0)

@@ -29,7 +29,7 @@ echo "Host:          $(uname -sr) on $(uname -m)"
 echo "======================================================================"
 printf "\n"
 
-# Helper to run a command and extract throughput in GB/s (or MB/s normalized to GB/s)
+# Helper to run a command and extract throughput in GB/s
 measure_speed() {
   local out
   out=$("$@" 2>&1 || true)
@@ -73,48 +73,13 @@ measure_speed() {
   esac
 }
 
-# Run standard benchmark test where both binaries take identical CLI arguments
-run_test() {
-  local title="$1"
-  shift
-  local args=("$@")
-
-  printf "%-36s : " "$title"
-
-  local sys_best=0
-  local loc_best=0
-
-  for i in {1..3}; do
-    local s_speed l_speed
-    s_speed=$(measure_speed "$SYSTEM_DD" "${args[@]}")
-    l_speed=$(measure_speed "$LOCAL_BLKCP" "${args[@]}")
-
-    sys_best=$(awk -v a="$sys_best" -v b="$s_speed" 'BEGIN { print (a > b ? a : b) }')
-    loc_best=$(awk -v a="$loc_best" -v b="$l_speed" 'BEGIN { print (a > b ? a : b) }')
-  done
-
-  local delta
-  delta=$(awk -v l="$loc_best" -v s="$sys_best" 'BEGIN {
-    if (s > 0) {
-      d = ((l - s) / s) * 100;
-      if (d >= 0) printf "+%.1f%%", d;
-      else printf "%.1f%%", d;
-    } else {
-      print "N/A";
-    }
-  }')
-
-  printf "System: %6.2f GB/s  |  Local: %6.2f GB/s  |  Delta: %7s\n" "$sys_best" "$loc_best" "$delta"
-}
-
-# Run asymmetric benchmark test comparing feature-optimized local run against system baseline
-run_custom_test() {
+# Run asymmetric benchmark test comparing blkcp modern syntax against system dd
+run_bench() {
   local title="$1"
   shift
   local sys_args=()
   local loc_args=()
 
-  # Split arguments separated by the marker "VS"
   local seen_vs=false
   for arg in "$@"; do
     if [[ "$arg" == "VS" ]]; then
@@ -159,59 +124,84 @@ run_custom_test() {
 # Prepare test data for file-to-file benchmark
 head -c 300M /dev/zero > "$TMP_DIR/bench_in.bin"
 
-echo "--- 1. POSIX Standard Comparison Benchmarks ---"
-run_test "1. Stream bs=1M (2GB)"        if=/dev/zero of=/dev/null bs=1M count=2000 status=progress
-run_test "2. Stream bs=64k (3.2GB)"     if=/dev/zero of=/dev/null bs=64k count=50000 status=progress
-run_test "3. Two-Buf ibs=64k obs=64k"   if=/dev/zero of=/dev/null ibs=64k obs=64k count=50000 status=progress
-run_test "4. Small Block bs=4k (400MB)" if=/dev/zero of=/dev/null bs=4k count=100000 status=progress
-run_test "5. Sparse conv=sparse (2GB)"  if=/dev/zero of=/dev/null bs=64k count=30000 conv=sparse status=progress
-run_test "6. File-to-File (300MB)"      if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_out.bin" bs=64k status=progress
-run_test "7. Conversion conv=ucase"     if=/dev/zero of=/dev/null bs=64k count=20000 conv=ucase status=progress
+echo "--- 1. Baseline & High-Throughput Stream Benchmarks ---"
+run_bench "1. Stream bs=1M (2GB)" \
+  if=/dev/zero of=/dev/null bs=1M count=2000 status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 1M -c 2000 -p
+
+run_bench "2. Stream bs=64k (3.2GB)" \
+  if=/dev/zero of=/dev/null bs=64k count=50000 status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 64K -c 50000 -p
+
+run_bench "3. Small Block bs=4k (400MB)" \
+  if=/dev/zero of=/dev/null bs=4k count=100000 status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 4K -c 100000 -p
+
+run_bench "4. Sparse Stream (2GB)" \
+  if=/dev/zero of=/dev/null bs=64k count=30000 conv=sparse status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 64K -c 30000 --sparse -p
+
+run_bench "5. File-to-File (300MB)" \
+  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_f2f.bin" bs=64k status=progress \
+  VS \
+  -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_f2f.bin" -b 64K -p
+
+run_bench "6. Positional Syntax File-to-File" \
+  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_pos.bin" bs=64k status=progress \
+  VS \
+  "$TMP_DIR/bench_in.bin" "$TMP_DIR/bench_loc_pos.bin" -b 64K -p
 
 printf "\n"
 echo "--- 2. Modern Subsystem & Optimizer Benchmarks ---"
-# Test 8: Compare autotuning against unoptimized default (bs=512)
-run_custom_test "8. Autotune (bs=auto vs def 512)" \
+
+# Test 7: Autotuning vs unoptimized default
+run_bench "7. Autotune (bs=auto vs def 512)" \
   if="$TMP_DIR/bench_in.bin" of=/dev/null status=progress \
   VS \
-  if="$TMP_DIR/bench_in.bin" of=/dev/null bs=auto status=progress
+  -i "$TMP_DIR/bench_in.bin" -o /dev/null -b auto -p
 
-# Test 9: Async Double-Buffering on File-to-File transfer
-run_custom_test "9. Async Double-Buffer (opt=async)" \
+# Test 8: Async Double-Buffering on File-to-File transfer
+run_bench "8. Async Double-Buffer (-e async)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_async.bin" bs=64k status=progress \
   VS \
-  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_loc_async.bin" bs=64k opt=async status=progress
+  -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_async.bin" -b 64K -e async -p
 
-# Test 10: In-Kernel Zero-Copy (copy_file_range vs POSIX copy)
-run_custom_test "10. Kernel Zero-Copy (conv=reflink)" \
+# Test 9: In-Kernel Zero-Copy (copy_file_range vs POSIX copy)
+run_bench "9. Kernel Zero-Copy (-e reflink)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_out.bin" bs=1M status=progress \
   VS \
-  if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_loc_out.bin" conv=reflink status=progress
+  -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_out.bin" -e reflink -p
 
-# Test 11: Arbitrary Byte Count targeting
-run_custom_test "11. Exact Byte Target (tc=1G)" \
+# Test 10: Arbitrary Byte Count targeting
+run_bench "10. Exact Byte Limit (-l 1G)" \
   if=/dev/zero of=/dev/null bs=1M count=1073741824 iflag=count_bytes status=progress \
   VS \
-  if=/dev/zero of=/dev/null bs=auto tc=1G status=progress
+  -i /dev/zero -o /dev/null -b 1M -l 1G -p
 
-# Test 12: In-Flight SHA256 Streaming Integrity Checksum
-run_custom_test "12. In-Flight SHA256 (conv=sha256)" \
+# Test 11: In-Flight SHA256 Streaming Integrity Checksum
+run_bench "11. In-Flight SHA256 (--hash)" \
   if=/dev/zero of=/dev/null bs=64k count=30000 status=progress \
   VS \
-  if=/dev/zero of=/dev/null bs=64k count=30000 conv=sha256 status=progress
+  -i /dev/zero -o /dev/null -b 64K -c 30000 --hash -p
 
-# Test 13: io_uring Asynchronous Kernel Engine (-e uring vs standard sync)
-run_custom_test "13. io_uring Engine (-e uring)" \
+# Test 12: io_uring Asynchronous Kernel Engine (-e uring vs standard sync)
+run_bench "12. io_uring Engine (-e uring)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_uring.bin" bs=1M status=progress \
   VS \
   -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_uring.bin" -b 1M -e uring -p
 
-# Test 14: SIMD AVX2-accelerated Byte Swapping (conv=swab)
-run_test "14. Byte Swap conv=swab (2GB)" \
-  if=/dev/zero of=/dev/null bs=64k count=30000 conv=swab status=progress
+# Test 13: SIMD AVX2-accelerated Byte Swapping (--swab)
+run_bench "13. Byte Swap (--swab 2GB)" \
+  if=/dev/zero of=/dev/null bs=64k count=30000 conv=swab status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 64K -c 30000 --swab -p
 
-# Test 15: In-Kernel Zero-Copy Splice Engine (-e splice vs standard sync)
-run_custom_test "15. Kernel Splice (-e splice)" \
+# Test 14: In-Kernel Zero-Copy Splice Engine (-e splice vs standard sync)
+run_bench "14. Kernel Splice (-e splice)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_splice.bin" bs=1M status=progress \
   VS \
   -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_splice.bin" -b 1M -e splice -p

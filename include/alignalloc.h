@@ -90,6 +90,9 @@ alignalloc (idx_t alignment, idx_t size)
     size = (size_t) -1;
 
 # if ALIGNALLOC_VIA_ALIGNED_ALLOC
+  /* ISO C11 §7.22.3.1 requires size to be an integral multiple of alignment. */
+  if (alignment > 0 && (size % alignment) != 0)
+    size = ((size + alignment - 1) / alignment) * alignment;
   return aligned_alloc (alignment, size);
 # else
   void *ptr = NULL;

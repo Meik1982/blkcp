@@ -206,6 +206,19 @@ dd_check_progress (dd_context_t *ctx)
   if (!is_json && !is_text_progress)
     return;
 
+  /* Hot-path vDSO clock throttling:
+   * Polling gethrxtime() on every block creates measurable overhead at high IOPS
+   * (e.g. 500k blocks/sec on 4K streams). We only poll the monotonic clock every
+   * 64 iterations, OR when at least 64 KiB have been transferred since the last
+   * clock sample. This eliminates ~98.4% of vDSO invocations while keeping the
+   * 1-Hz visual progress telemetry 100% responsive. */
+  if ((++ctx->stats.progress_check_counter & 0x3F) != 0)
+    {
+      if (ctx->stats.w_bytes - ctx->stats.last_clock_check_bytes < 65536)
+        return;
+    }
+  ctx->stats.last_clock_check_bytes = ctx->stats.w_bytes;
+
   xtime_t now = gethrxtime ();
   if (now >= ctx->stats.next_time)
     {

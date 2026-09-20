@@ -113,8 +113,9 @@ typedef struct dd_config
 {
   char const *input_file;         /**< Path to input file or device (NULL for stdin) */
   char const *output_file;        /**< Path to output file or device (NULL for stdout) */
-  idx_t input_blocksize;          /**< Block size for read operations */
-  idx_t output_blocksize;         /**< Block size for write operations */
+  idx_t blocksize;                /**< Canonical block size for read/write operations (-b / --block-size) */
+#define input_blocksize blocksize
+#define output_blocksize blocksize
   intmax_t skip_records;          /**< Input blocks to skip before copying */
   idx_t skip_bytes;               /**< Additional bytes to skip */
   intmax_t seek_records;          /**< Output blocks to seek before writing */
@@ -150,6 +151,8 @@ typedef struct dd_stats
   xtime_t start_time;             /**< Transfer start timestamp (nanoseconds via TSC) */
   xtime_t next_time;              /**< Next scheduled periodic progress report time */
   int progress_len;               /**< Character length of last printed progress line */
+  uint32_t progress_check_counter; /**< Fast counter to throttle vDSO clock polls in hot loop */
+  intmax_t last_clock_check_bytes; /**< Last transferred bytes count when clock was sampled */
 
   /* Async pipeline telemetry (when engine == ENGINE_ASYNC) */
   size_t async_capacity;          /**< Active ringbuffer capacity */
@@ -184,6 +187,10 @@ typedef struct dd_context
 
   /* Dynamic function pointers */
   ssize_t (*iread_fnc) (int fd, char *buf, idx_t size); /**< Custom reader routine */
+
+  /* Streaming cache eviction state (--nocache chunking) */
+  off_t i_nocache_pending;        /**< Un-evicted input bytes pending chunked fadvise */
+  off_t o_nocache_pending;        /**< Un-evicted output bytes pending chunked fadvise */
 
   /* On-the-fly checksumming state (Hardware-accelerated OpenSSL EVP) */
   EVP_MD_CTX *sha_evp_ctx;        /**< Streaming EVP SHA-256 computation state */

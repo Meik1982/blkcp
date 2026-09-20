@@ -219,7 +219,7 @@ check_target_safety (dd_context_t *ctx)
                   fclose (fp);
                   error (EXIT_FAILURE, 0,
                          _("SAFETY GUARD: refusing to overwrite '%s' which contains mounted system path '%s'.\n"
-                           "Use 'oflag=force' or 'opt=force' to override if intentional."),
+                           "Use '-f' or '--force' to override if intentional."),
                          quoteaf (ctx->cfg.output_file), quoteaf (mountpoint));
                 }
             }
@@ -227,6 +227,53 @@ check_target_safety (dd_context_t *ctx)
     }
 
   fclose (fp);
+
+  /* Check /proc/swaps to protect active system swap partitions */
+  FILE *sfp = fopen ("/proc/swaps", "r");
+  if (sfp)
+    {
+      char sline[1024];
+      char swap_dev[512];
+      /* Skip header line */
+      if (fgets (sline, sizeof sline, sfp))
+        {
+          while (fgets (sline, sizeof sline, sfp))
+            {
+              if (sscanf (sline, "%511s", swap_dev) != 1)
+                continue;
+
+              struct stat sw_st;
+              if (stat (swap_dev, &sw_st) == 0 && S_ISBLK (sw_st.st_mode))
+                {
+                  bool match = false;
+                  if (sw_st.st_rdev == target_st.st_rdev)
+                    match = true;
+                  else if (major (sw_st.st_rdev) == major (target_st.st_rdev))
+                    {
+                      char const *tgt_base = strrchr (ctx->cfg.output_file, '/');
+                      char const *dev_base = strrchr (swap_dev, '/');
+                      if (tgt_base && dev_base)
+                        {
+                          tgt_base++;
+                          dev_base++;
+                          if (is_partition_of_device (dev_base, tgt_base))
+                            match = true;
+                        }
+                    }
+
+                  if (match)
+                    {
+                      fclose (sfp);
+                      error (EXIT_FAILURE, 0,
+                             _("SAFETY GUARD: refusing to overwrite '%s' which is an active system swap device (%s).\n"
+                               "Use '-f' or '--force' to override if intentional."),
+                             quoteaf (ctx->cfg.output_file), quoteaf (swap_dev));
+                    }
+                }
+            }
+        }
+      fclose (sfp);
+    }
 }
 #endif
 
@@ -277,8 +324,9 @@ dd_alloc_obuf (dd_context_t *ctx)
         alloc_size = ((alloc_size + ctx->page_size - 1) / ctx->page_size) * ctx->page_size;
       ctx->obuf = alignalloc (ctx->page_size, alloc_size);
     }
-  else if (ctx->cfg.input_blocksize == ctx->cfg.output_blocksize && ctx->ibuf)
+  else if (ctx->ibuf)
     {
+      /* Single unified buffer for input and output */
       ctx->obuf = ctx->ibuf;
       return;
     }
@@ -321,6 +369,36 @@ dd_invalidate_cache (int fd, off_t len)
 #else
   (void) fd;
   (void) len;
+#endif
+}
+
+#define NOCACHE_CHUNK_THRESHOLD (32 * 1024 * 1024)
+
+void
+dd_invalidate_cache_chunked (int fd, off_t bytes, off_t *pending, bool force_flush)
+{
+#if HAVE_POSIX_FADVISE
+  if (pending)
+    *pending += bytes;
+
+  off_t to_evict = pending ? *pending : bytes;
+
+  if (to_evict >= NOCACHE_CHUNK_THRESHOLD || (force_flush && to_evict > 0))
+    {
+      off_t pos = lseek (fd, 0, SEEK_CUR);
+      if (0 <= pos)
+        {
+          off_t off = to_evict < pos ? pos - to_evict : 0;
+          posix_fadvise (fd, off, to_evict, POSIX_FADV_DONTNEED);
+        }
+      if (pending)
+        *pending = 0;
+    }
+#else
+  (void) fd;
+  (void) bytes;
+  (void) pending;
+  (void) force_flush;
 #endif
 }
 
@@ -431,6 +509,9 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
         }
       total_written += nwritten;
     }
+
+  if (ctx->cfg.o_nocache && total_written > 0)
+    dd_invalidate_cache_chunked (fd, total_written, &ctx->o_nocache_pending, false);
 
   return total_written;
 }
@@ -923,9 +1004,9 @@ dd_execute (dd_context_t *ctx)
   int status = dd_copy (ctx);
 
   if (ctx->cfg.i_nocache || ctx->cfg.i_nocache_eof)
-    dd_invalidate_cache (STDIN_FILENO, 0);
+    dd_invalidate_cache_chunked (STDIN_FILENO, 0, &ctx->i_nocache_pending, true);
   if (ctx->cfg.o_nocache || ctx->cfg.o_nocache_eof)
-    dd_invalidate_cache (STDOUT_FILENO, 0);
+    dd_invalidate_cache_chunked (STDOUT_FILENO, 0, &ctx->o_nocache_pending, true);
 
   dd_engine_cleanup (ctx);
   dd_print_stats (ctx);

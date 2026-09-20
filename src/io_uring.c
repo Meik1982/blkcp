@@ -243,70 +243,83 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
     }
 
   /* ------------------------------------------------------------- */
-  /* Phase 2: Wait for in-flight completions (Read and/or Write)   */
+  /* Phase 2: Asynchronous CQE-Harvesting & Completion Handling    */
   /* ------------------------------------------------------------- */
   while (st->read_in_flight || st->write_in_flight)
     {
-      struct io_uring_cqe *cqe = NULL;
-      int ret = io_uring_wait_cqe (&st->ring, &cqe);
-      if (ret == -EINTR)
-        return EXIT_SUCCESS; /* Signal interrupt: yield to signal dispatcher */
-      if (ret < 0)
-        {
-          dd_diagnose (-ret, _("io_uring: wait_cqe failed"));
-          return EXIT_FAILURE;
-        }
+      struct io_uring_cqe *cqes[URING_NUM_BUFFERS];
+      unsigned int n_cqes = io_uring_peek_batch_cqe (&st->ring, cqes, URING_NUM_BUFFERS);
 
-      uint64_t tag = cqe->user_data;
-      int res = cqe->res;
-      io_uring_cqe_seen (&st->ring, cqe);
-
-      if (tag == TAG_WRITE)
+      if (n_cqes == 0)
         {
-          st->write_in_flight = false;
-          if (res < 0)
+          /* No completions pending in user ring; block on kernel once */
+          struct io_uring_cqe *cqe = NULL;
+          int ret = io_uring_wait_cqe (&st->ring, &cqe);
+          if (ret == -EINTR)
+            return EXIT_SUCCESS; /* Signal interrupt: yield to signal dispatcher */
+          if (ret < 0)
             {
-              if (res == -EINTR || res == -EAGAIN)
-                continue;
-              dd_diagnose (-res, _("io_uring: write error on %s"), quoteaf (ctx->cfg.output_file));
+              dd_diagnose (-ret, _("io_uring: wait_cqe failed"));
               return EXIT_FAILURE;
             }
-
-          if (st->out_seekable)
-            st->out_file_pos += res;
-
-          ctx->stats.w_bytes += res;
-          if (ctx->cfg.output_blocksize > 0 && (size_t) res == (size_t) ctx->cfg.output_blocksize)
-            ctx->stats.w_full++;
-          else
-            ctx->stats.w_partial++;
+          cqes[0] = cqe;
+          n_cqes = 1;
         }
-      else if (tag == TAG_READ)
+
+      for (unsigned int i = 0; i < n_cqes; i++)
         {
-          st->read_in_flight = false;
-          if (res < 0)
-            {
-              if (res == -EINTR || res == -EAGAIN)
-                continue;
-              dd_diagnose (-res, _("io_uring: read error on %s"), quoteaf (ctx->cfg.input_file));
-              return EXIT_FAILURE;
-            }
+          struct io_uring_cqe *cqe = cqes[i];
+          uint64_t tag = cqe->user_data;
+          int res = cqe->res;
+          io_uring_cqe_seen (&st->ring, cqe);
 
-          if (res == 0)
+          if (tag == TAG_WRITE)
             {
-              st->read_eof = true;
-              st->slots[st->read_slot].length = 0;
-            }
-          else
-            {
-              st->slots[st->read_slot].length = (size_t) res;
-              if (st->in_seekable)
-                st->in_file_pos += res;
+              st->write_in_flight = false;
+              if (res < 0)
+                {
+                  if (res == -EINTR || res == -EAGAIN)
+                    continue;
+                  dd_diagnose (-res, _("io_uring: write error on %s"), quoteaf (ctx->cfg.output_file));
+                  return EXIT_FAILURE;
+                }
 
-              if (ctx->cfg.input_blocksize > 0 && (size_t) res == (size_t) ctx->cfg.input_blocksize)
-                ctx->stats.r_full++;
+              if (st->out_seekable)
+                st->out_file_pos += res;
+
+              ctx->stats.w_bytes += res;
+              if (ctx->cfg.blocksize > 0 && (size_t) res == (size_t) ctx->cfg.blocksize)
+                ctx->stats.w_full++;
               else
-                ctx->stats.r_partial++;
+                ctx->stats.w_partial++;
+            }
+          else if (tag == TAG_READ)
+            {
+              st->read_in_flight = false;
+              if (res < 0)
+                {
+                  if (res == -EINTR || res == -EAGAIN)
+                    continue;
+                  dd_diagnose (-res, _("io_uring: read error on %s"), quoteaf (ctx->cfg.input_file));
+                  return EXIT_FAILURE;
+                }
+
+              if (res == 0)
+                {
+                  st->read_eof = true;
+                  st->slots[st->read_slot].length = 0;
+                }
+              else
+                {
+                  st->slots[st->read_slot].length = (size_t) res;
+                  if (st->in_seekable)
+                    st->in_file_pos += res;
+
+                  if (ctx->cfg.blocksize > 0 && (size_t) res == (size_t) ctx->cfg.blocksize)
+                    ctx->stats.r_full++;
+                  else
+                    ctx->stats.r_partial++;
+                }
             }
         }
 

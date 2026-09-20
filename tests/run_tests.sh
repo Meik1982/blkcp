@@ -287,4 +287,9 @@ $BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_splice_limit.bin" 
 cmp -n 54321 "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_splice_limit.bin"
 echo "Test 31 passed: Kernel-Level Zero-Copy Splice Engine (splice(2)) for pipes and files"
 
-echo "=== All 31 modern blkcp tests passed successfully! ==="
+# Test 32: Streaming Cache-Eviction (--nocache) bit-exactness
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_nocache_out.bin" --nocache -q
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_nocache_out.bin"
+echo "Test 32 passed: Streaming Cache-Eviction (--nocache) bit-exactness"
+
+echo "=== All 32 modern blkcp tests passed successfully! ==="

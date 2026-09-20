@@ -64,6 +64,7 @@ ssize_t dd_iread (int fd, char *buf, idx_t size);
 idx_t dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size);
 void dd_advance_input_offset (dd_context_t *ctx, off_t nread);
 void dd_invalidate_cache (int fd, off_t len);
+void dd_invalidate_cache_chunked (int fd, off_t bytes, off_t *pending, bool force_flush);
 
 /* Hardware blocksize detection */
 idx_t dd_detect_optimal_blocksize (int fd);

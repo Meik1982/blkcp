@@ -43,6 +43,7 @@ enum
   OPT_FSYNC,
   OPT_NOERROR,
   OPT_NOTRUNC,
+  OPT_NOCACHE,
   OPT_JSON,
   OPT_QUEUE_DEPTH
 };
@@ -68,6 +69,7 @@ static struct option const modern_long_options[] =
   {"hash",         no_argument,       NULL, OPT_HASH},
   {"sha256",       no_argument,       NULL, OPT_HASH},
   {"direct",       no_argument,       NULL, OPT_DIRECT},
+  {"nocache",      no_argument,       NULL, OPT_NOCACHE},
   {"sparse",       no_argument,       NULL, OPT_SPARSE},
   {"sync",         no_argument,       NULL, OPT_SYNC},
   {"swab",         no_argument,       NULL, OPT_SWAB},
@@ -250,6 +252,10 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
         case OPT_DIRECT:
           cfg->input_flags |= O_DIRECT;
           cfg->output_flags |= O_DIRECT;
+          break;
+        case OPT_NOCACHE:
+          cfg->i_nocache = true;
+          cfg->o_nocache = true;
           break;
         case OPT_SPARSE:
           cfg->conversions_mask |= C_SPARSE;

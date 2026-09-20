@@ -38,6 +38,7 @@ _arguments -s -S \
     '--autotune[Enable dynamic throughput autotuning (bs=auto)]' \
     '--hash[Compute on-the-fly streaming SHA-256 digest]' \
     '--direct[Bypass OS page cache using O_DIRECT flags]' \
+    '--nocache[Discard cache in 32-MiB chunks via POSIX_FADV_DONTNEED]' \
     '--queue-depth=[Ringbuffer slot capacity for async engine (2..1024)]:depth:' \
     '--async-queue=[Alias for --queue-depth]:depth:' \
     '--sparse[Punch sparse holes for NUL-byte blocks]' \

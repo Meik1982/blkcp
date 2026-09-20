@@ -60,6 +60,7 @@ src/
 * `--autotune`: Dynamisches Durchsatz-Autotuning
 * `--queue-depth <N>`: Ringpuffer-Slotanzahl für die `async`-Engine (Standard: adaptive dynamische Skalierung)
 * `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
+* `--nocache`: Durchsatzschonende Streaming-Cache-Eviction (`posix_fadvise(DONTNEED)` in 32-MiB-Chunks)
 * `--skip <SIZE>`: Offset am Eingang überspringen
 * `--seek <SIZE>`: Offset am Ausgang vor dem Schreiben anspringen
 * `--sparse`: Nullblöcke als Sparse-Holes erzeugen

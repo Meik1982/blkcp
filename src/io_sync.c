@@ -242,7 +242,7 @@ sync_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
     {
       dd_advance_input_offset (ctx, nread);
       if (ctx->cfg.i_nocache)
-        dd_invalidate_cache (STDIN_FILENO, nread);
+        dd_invalidate_cache_chunked (STDIN_FILENO, nread, &ctx->i_nocache_pending, false);
     }
   else if (nread == 0)
     {

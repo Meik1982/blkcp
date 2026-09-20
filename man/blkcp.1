@@ -67,6 +67,9 @@ Benchmark and dynamically scale the block size during the initial transfer phase
 \fB\-\-direct\fR
 Enable direct I/O (\fBO_DIRECT\fR) bypassing the kernel page cache.
 .TP
+\fB\-\-nocache\fR
+Discard operating system page cache in 32-MiB streaming intervals via posix_fadvise(POSIX_FADV_DONTNEED).
+.TP
 \fB\-\-queue\-depth\fR=\fI\,N\/\fR, \fB\-\-async\-queue\fR=\fI\,N\/\fR
 Set the multi-threaded ringbuffer slot capacity for the \fBasync\fR engine (between 2 and 1024 slots). Defaults to dynamic adaptive scaling (auto) based on block size and target buffer budget.
 .TP
@@ -101,7 +104,7 @@ Display comprehensive help manual and exit.
 Display version information and exit.
 
 .SH TARGET SAFETY GUARD
-\fBblkcp\fR inspects target block devices prior to opening. If the target device holds an active system mount (e.g. \fB/\fR, \fB/boot\fR, \fB/usr\fR, \fB/home\fR), write execution is immediately refused unless \fB-f\fR or \fB--force\fR is explicitly supplied.
+\fBblkcp\fR inspects target block devices prior to opening. If the target device holds an active system mount (e.g. \fB/\fR, \fB/boot\fR, \fB/usr\fR, \fB/home\fR) or is an active system swap partition, write execution is immediately refused unless \fB-f\fR or \fB--force\fR is explicitly supplied.
 
 .SH SIGNAL HANDLING
 Sending \fBSIGUSR1\fR to a running \fBblkcp\fR process causes it to output current I/O progress and speed statistics to standard error before resuming operation.

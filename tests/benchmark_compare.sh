@@ -206,5 +206,9 @@ run_custom_test "13. io_uring Engine (-e uring)" \
   VS \
   -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_uring.bin" -b 1M -e uring -p
 
+# Test 14: SIMD AVX2-accelerated Byte Swapping (conv=swab)
+run_test "14. Byte Swap conv=swab (2GB)" \
+  if=/dev/zero of=/dev/null bs=64k count=30000 conv=swab status=progress
+
 echo "======================================================================"
 echo "Benchmark completed successfully."

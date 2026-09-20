@@ -210,4 +210,12 @@ $BLKCP_BIN -o "$TMP_DIR/rand_pipe_out.bin" -b 64K -e uring -q < "$TMP_DIR/rand_o
 cmp "$TMP_DIR/rand_offset.bin" "$TMP_DIR/rand_pipe_out.bin"
 echo "Test 26 passed: io_uring streaming from stdin pipe"
 
-echo "=== All 26 extended tests passed successfully! ==="
+# Test 27: SIMD AVX2-accelerated conv=swab roundtrip bit-exactness on 4MB stream
+head -c 4194304 /dev/urandom > "$TMP_DIR/rand_swab_orig.bin"
+$BLKCP_BIN -i "$TMP_DIR/rand_swab_orig.bin" -o "$TMP_DIR/rand_swab_pass1.bin" -b 64K conv=swab -q
+$BLKCP_BIN -i "$TMP_DIR/rand_swab_pass1.bin" -o "$TMP_DIR/rand_swab_pass2.bin" -b 64K conv=swab -q
+[[ $(stat -c %s "$TMP_DIR/rand_swab_pass2.bin") -eq 4194304 ]]
+cmp "$TMP_DIR/rand_swab_orig.bin" "$TMP_DIR/rand_swab_pass2.bin"
+echo "Test 27 passed: SIMD AVX2-accelerated conv=swab 4MB roundtrip bit-exactness"
+
+echo "=== All 27 extended tests passed successfully! ==="

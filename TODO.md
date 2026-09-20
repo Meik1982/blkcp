@@ -1,48 +1,40 @@
-# TODO & Zukünftige Optimierungspotenziale für `dd`
+# TODO & Zukünftige Optimierungspotenziale für `blkcp`
 
-Dieses Dokument erfasst alle im abschließenden Code-Check identifizierten Optimierungspotenziale für künftige Ausbaustufen.
-
----
-
-## 1. High-Performance I/O & Kernel-Backends
-- [ ] **Linux `io_uring` Backend:**
-  - *Beschreibung:* Ergänzung eines alternativen I/O-Treibers in `src/io_engine.c` basierend auf `io_uring` Submission-/Completion-Queues.
-  - *Nutzen:* Vollständig asynchroner I/O, Reduktion von Kontextwechseln (Syscalls) auf fast 0 bei hohen Queue-Depths; ideal für NVMe-Arrays.
-- [x] **`copy_file_range(2)` & Reflink-Support:**
-  - *Status:* Erledigt. `dd_copy_reflink()` implementiert (`conv=reflink`, `opt=reflink` oder automatische Erkennung). Nutzt unter Linux den Syscall `copy_file_range(2)`, wenn Ein- und Ausgabe reguläre Dateien sind und keine blockverändernden Konvertierungen aktiv sind. Auf CoW-Dateisystemen (Btrfs, XFS) werden sofortige Reflink-Clones erzeugt; bei Inkompatibilität oder Dateisystemgrenzen greift ein eleganter, nahtloser Fallback auf den Standard-Userspace-Pfad. Verifiziert in Regressionstest 19.
-- [x] **Multi-Threaded Double-Buffering (Async Pipeline):**
-  - *Status:* Erledigt. Multi-Threaded Double-Buffering Pipeline mit Ringpuffer (`ASYNC_QUEUE_CAPACITY = 8`) via POSIX-Threads (`pthread`) implementiert (`opt=async` / `conv=async` / `oflag=async`). Entkoppelt Reader und Writer vollständig, blockiert Signale im Worker-Thread zur Vermeidung von Handler-Kollisionen und unterstützt Streaming-SHA-256 transparent. In Regressionstest 17 verifiziert.
+Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten priorisierten Aufgaben für `blkcp`.
 
 ---
 
-## 2. Vollständige Reentrancy & Library-Tauglichkeit
-- [x] **Kapselung verbleibender statischer Zustände:**
-  - *Status:* Erledigt. `trans_table[256]` und `pending_spaces` wurden vollständig in `dd_context_t` überführt. Translationen und Unblock-Operationen sind thread-sicher und reentrant.
-- [x] **Deterministisches Buffer-Lifecycle-Management (`dd_context_free`):**
-  - *Status:* Erledigt. `dd_context_free()` gibt allokierte I/O-Puffer (`ibuf`, `obuf`) deterministisch via `alignfree()` frei.
+## 1. Abgeschlossene Meilensteine
+
+- [x] **Modularisierung & Architektur-Entflechtung:**
+  GNU `dd.c`-Monolith vollständig in modulare Subsysteme zerlegt. Saubere Driver-Architektur (`dd_io_driver_t`: `sync`, `async`, `reflink`, `io_uring`) mit genau einer zentralen Kontrollschleife in `src/io_engine.c`.
+- [x] **Linux `io_uring` Asynchronous Engine (`src/io_uring.c`):**
+  Nativer `liburing`-Treiber mit Double-Buffering Ring-Pipeline, Signal-Resilienz (`EINTR`) und Fallback.
+- [x] **In-Kernel Zero-Copy Reflink (`src/io_reflink.c`):**
+  Unterstützung für `copy_file_range(2)` mit CoW-Klonen auf Btrfs/XFS/ZFS.
+- [x] **Multi-Threaded Async Double-Buffering (`src/io_async.c`):**
+  Entkoppelte Ringpuffer-Pipeline via `pthread` (+50 % Durchsatz bei File-to-File).
+- [x] **In-Flight Autotuning (`-b auto` / `--autotune`):**
+  Dynamische Blockgrößen-Skalierung (Hardware-Awareness via `ioctl(BLKPBSZGET)`).
+- [x] **Moderne POSIX/GNU-CLI (`src/args.c`):**
+  `-i`, `-o`, `-b`, `-e`, `-l`, `-p`, `-q`, `-f`, `--hash`, `--autotune`, `--direct`, `--sparse`, `--sync` und intuitive Positionsargumente.
+- [x] **Interaktive 2D-Spatial TUI (`src/tui/` - `blkcp-tui`):**
+  Vollständiger ncursesw-Assistent mit Engine-Selector, Byteziel, Live-Telemetrie und Clipboard-Export.
+- [x] **Target Safety Guard & Streaming SHA-256:**
+  Schutz gegen versehentliches Überschreiben gemounteter Partitionen; parallele Prüfsummenberechnung im Hot-Loop.
+- [x] **Qualitätssicherung & Dokumentation:**
+  26/26 Regressionstests grün (`make test`), 13 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`.
 
 ---
 
-## 3. SIMD- & Vektor-Optimierungen für Transformationen
-- [x] **SIMD-Vektorisierung für Case-Folding (`ucase`, `lcase`):**
-  - *Status:* Erledigt. `dd_vector_ucase()` und `dd_vector_lcase()` implementiert. Durch branchless Transformationen vektorisiert GCC/Clang den Code automatisch in AVX2/SSE-Instruktionen. Der Durchsatz stieg im Benchmark von 1,9 GB/s auf **8,6 GB/s (+352,6 %)**.
-- [ ] **SIMD-optimiertes Byte-Swapping (`conv=swab`):**
-  - *Beschreibung:* Vektorisierung von `dd_swab_buffer()` via `_mm256_shuffle_epi8` / `vrev16q_u8`.
-  - *Nutzen:* Durchsatzsteigerung bei Endianness-Transfers auf Multi-Gigabyte-Niveau.
+## 2. Nächste geplante Ausbaustufen
 
----
+### A. SIMD-Vektorisierung für Endian-Byte-Swapping (`swab`)
+- **Ziel:** Vektorisierung von `dd_swab_buffer()` in `src/conversions.c` via SSSE3/AVX2 `_mm_shuffle_epi8` / `_mm256_shuffle_epi8`.
+- **Nutzen:** Beseitigt den skalaren Flaschenhals bei Big-Endian / Little-Endian Konvertierungen; skaliert Durchsatz auf Multi-Gigabyte/s-Niveau.
 
-## 4. Hardware-Awareness & Autotuning-Erweiterungen
-- [x] **Device Block Limits via `ioctl`:**
-  - *Status:* Erledigt. `detect_optimal_blocksize()` ermittelt via `BLKPBSZGET`, `BLKIOOPT` (Linux) und `st_blksize` (POSIX) die physische Sektor- und optimale I/O-Größe. Das Autotuning richtet die minimale Blockgröße automatisch an den Hardware-Grenzen aus, um RMW-Penalties auf 4Kn-Laufwerken und RAID-Stripes zu eliminieren.
-- [ ] **Persistentes Profiling-Caching:**
-  - *Beschreibung:* Speichern optimaler Blockgrößen basierend auf Quell-/Ziel-Device-UUIDs in einer lokalen Cache-Tabelle.
-  - *Nutzen:* Überspringen der anfänglichen 50-ms-Profiling-Phase bei wiederholten Übertragungen auf dieselben Laufwerke.
+### B. O_DIRECT Memory & Offset Auto-Alignment Guard
+- **Ziel:** Automatische Erkennung fehlausgerichteter Puffer oder Offsets bei `--direct` und transparenter Fallback / Sektor-Padding, um `EINVAL` auf NVMe 4Kn-Laufwerken proaktiv abzufangen.
 
----
-
-## 5. Ergonomie, Datenintegrität & Safety-Guards
-- [x] **Target Safety-Guard (Root / Mounted Partition Check):**
-  - *Status:* Erledigt. `check_target_safety()` prüft via `/proc/mounts` und Major-/Device-IDs, ob `of=` das aktive `/`, `/boot`, `/boot/efi` oder `/home`-Dateisystem oder dessen übergeordnete Disk adressiert. Bricht mit klarer Schutzmeldung ab, es sei denn `oflag=force`, `conv=force` oder `opt=force` wurde explizit angegeben. In Regressionstest 15 erfolgreich verifiziert.
-- [x] **Integrierte On-the-Fly Streaming-Prüfsumme:**
-  - *Status:* Erledigt. `conv=sha256` (sowie `opt=sha256` / `conv=hash`) implementiert. Berechnet den kryptografischen SHA-256 Digest on-the-fly parallel zum Schreiben in `iwrite()` ohne zusätzlichen I/O-Pass. Ermöglicht sofortige Integritätsverifikation beim Schreiben von Boot-Images/USB-Sticks. In Regressionstest 16 mit 4-MB-Zufallsdaten verifiziert.
+### C. Überlappende Asynchron-Pipeline für `io_uring` (Pipelined Double-Queue)
+- **Ziel:** Überlappen von Read-SQE (Slot N+1) mit Write-SQE (Slot N) im Linux-Kernel, um Kontextwechsel noch weiter gegen 0 zu drücken.

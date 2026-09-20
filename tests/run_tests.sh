@@ -266,4 +266,23 @@ assert data['pipeline']['capacity'] == 128
 "
 echo "Test 30 passed: Dynamic Ringbuffer Scaling and custom queue depth in io_async (--queue-depth)"
 
-echo "=== All 30 extended tests passed successfully! ==="
+# Test 31: Kernel-Level Zero-Copy Splice Engine (splice(2))
+# 31a: Pipe-to-File
+cat "$TMP_DIR/rand_direct_in.bin" | $BLKCP_BIN -o "$TMP_DIR/rand_splice_p2f.bin" -e splice -q
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_splice_p2f.bin"
+
+# 31b: File-to-Pipe
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -e splice -q | cat > "$TMP_DIR/rand_splice_f2p.bin"
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_splice_f2p.bin"
+
+# 31c: Double-Splice File-to-File
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_splice_f2f.bin" -e splice -q
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_splice_f2f.bin"
+
+# 31d: Splice with exact byte limit (-l 54321)
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_splice_limit.bin" -e splice -l 54321 -q
+[[ $(stat -c %s "$TMP_DIR/rand_splice_limit.bin") -eq 54321 ]]
+cmp -n 54321 "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_splice_limit.bin"
+echo "Test 31 passed: Kernel-Level Zero-Copy Splice Engine (splice(2)) for pipes and files"
+
+echo "=== All 31 extended tests passed successfully! ==="

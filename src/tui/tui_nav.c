@@ -20,7 +20,8 @@ tui_nav_right(tui_field_id_t cur)
     case FIELD_OF_SEARCH_DEV:   return FIELD_OF_SEARCH_PIPE;
     case FIELD_OF_SEARCH_PIPE:  return FIELD_OF;
 
-    case FIELD_ENGINE:          return FIELD_ENGINE;
+    case FIELD_ENGINE:          return FIELD_QUEUE_DEPTH;
+    case FIELD_QUEUE_DEPTH:     return FIELD_ENGINE;
     case FIELD_BS:              return FIELD_BS;
     case FIELD_LIMIT:           return FIELD_LIMIT;
 
@@ -61,7 +62,8 @@ tui_nav_left(tui_field_id_t cur)
     case FIELD_OF_SEARCH_FILE:  return FIELD_OF;
     case FIELD_OF:              return FIELD_OF_SEARCH_PIPE;
 
-    case FIELD_ENGINE:          return FIELD_ENGINE;
+    case FIELD_ENGINE:          return FIELD_QUEUE_DEPTH;
+    case FIELD_QUEUE_DEPTH:     return FIELD_ENGINE;
     case FIELD_BS:              return FIELD_BS;
     case FIELD_LIMIT:           return FIELD_LIMIT;
 
@@ -103,6 +105,7 @@ tui_nav_down(tui_field_id_t cur)
     case FIELD_OF_SEARCH_PIPE:  return FIELD_ENGINE;
 
     case FIELD_ENGINE:          return FIELD_BS;
+    case FIELD_QUEUE_DEPTH:     return FIELD_BS;
     case FIELD_BS:              return FIELD_LIMIT;
     case FIELD_LIMIT:           return FIELD_COUNT;
 
@@ -144,6 +147,7 @@ tui_nav_up(tui_field_id_t cur)
     case FIELD_OF_SEARCH_PIPE:  return FIELD_IF_SEARCH_PIPE;
 
     case FIELD_ENGINE:          return FIELD_OF;
+    case FIELD_QUEUE_DEPTH:     return FIELD_OF;
     case FIELD_BS:              return FIELD_ENGINE;
     case FIELD_LIMIT:           return FIELD_BS;
     case FIELD_COUNT:           return FIELD_LIMIT;

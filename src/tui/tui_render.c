@@ -17,6 +17,7 @@ tui_init_form(tui_form_t *form)
 {
     memset(form, 0, sizeof *form);
     form->engine = TUI_ENGINE_AUTO;
+    snprintf(form->queue_depth, sizeof form->queue_depth, "auto");
     snprintf(form->bs, sizeof form->bs, "auto");
     form->status_mode = 2; /* -p (progress) by default */
     form->opt_autotune = true;
@@ -63,11 +64,19 @@ tui_build_command(tui_form_t const *form, char const *blkcp_bin, char *cmd, size
     case TUI_ENGINE_REFLINK:
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e reflink");
         break;
+    case TUI_ENGINE_SPLICE:
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e splice");
+        break;
     case TUI_ENGINE_SYNC:
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -e sync");
         break;
     default:
         break; /* auto engine is default */
+    }
+
+    /* Queue depth for async engine */
+    if (form->queue_depth[0] && strcmp(form->queue_depth, "auto") != 0) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --queue-depth=%s", form->queue_depth);
     }
 
     /* Block size */
@@ -118,6 +127,8 @@ tui_build_command(tui_form_t const *form, char const *blkcp_bin, char *cmd, size
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -q");
     } else if (form->status_mode == 2) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -p");
+    } else if (form->status_mode == 3) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " --json");
     }
 
     snprintf(cmd, cmd_len, "%s%s%s", prefix, buf, suffix);
@@ -156,6 +167,7 @@ engine_name_str(tui_engine_mode_t engine)
     case TUI_ENGINE_URING:   return "io_uring (Async Kernel Queue)";
     case TUI_ENGINE_ASYNC:   return "async (Pthread Ringbuffer)";
     case TUI_ENGINE_REFLINK: return "reflink (Zero-Copy copy_file_range)";
+    case TUI_ENGINE_SPLICE:  return "splice (Kernel Zero-Copy Pipe)";
     case TUI_ENGINE_SYNC:    return "sync (Standard Block I/O)";
     default:                 return "auto (Intelligent Auto-Detection)";
     }
@@ -197,10 +209,12 @@ tui_render(WINDOW *win, tui_form_t const *form)
     if (form->active_field == FIELD_ENGINE) {
         wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
     }
-    mvwprintw(win, 8, 15, "< %-36s > (Leertaste)", engine_name_str(form->engine));
+    mvwprintw(win, 8, 15, "< %-33s > (Leertaste)", engine_name_str(form->engine));
     if (form->active_field == FIELD_ENGINE) {
         wattroff(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
     }
+
+    draw_field_str(win, 8, 56, "Queue: ", form->queue_depth, 8, form->active_field == FIELD_QUEUE_DEPTH);
 
     draw_field_str(win, 9, 2, "Blocksize (-b): ", form->bs, 10, form->active_field == FIELD_BS);
     mvwprintw(win, 9, 32, "(z.B. auto, 64K, 1M, 4M, 16M)");
@@ -227,10 +241,11 @@ tui_render(WINDOW *win, tui_form_t const *form)
     draw_checkbox(win, 16, 38, "Zero Padding Short Reads (--sync)", form->opt_sync, form->active_field == FIELD_OPT_SYNC);
 
     /* Section 4: Telemetrie */
-    mvwprintw(win, 18, 2, "Status: (%c) Quiet (-q)   (%c) Standard   (%c) Live Progress (-p)",
+    mvwprintw(win, 18, 2, "Status: (%c) Quiet (-q)  (%c) Standard  (%c) Progress (-p)  (%c) NDJSON (--json)",
               form->status_mode == 0 ? '*' : ' ',
               form->status_mode == 1 ? '*' : ' ',
-              form->status_mode == 2 ? '*' : ' ');
+              form->status_mode == 2 ? '*' : ' ',
+              form->status_mode == 3 ? '*' : ' ');
     if (form->active_field == FIELD_STATUS) {
         wattron(win, A_REVERSE | A_BOLD | COLOR_PAIR(3));
         mvwprintw(win, 18, 2, "Status:");

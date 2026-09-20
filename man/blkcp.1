@@ -33,6 +33,8 @@ Select the low-level data transfer execution engine:
 .IP \(bu 2
 \fBreflink\fR: Zero-copy in-kernel cloning via \fBcopy_file_range(2)\fR (instantaneous on CoW filesystems like Btrfs/XFS/ZFS).
 .IP \(bu 2
+\fBsplice\fR: Zero-copy in-kernel pipe and stream pipeline via \fBsplice(2)\fR.
+.IP \(bu 2
 \fBsync\fR: Direct synchronous block I/O with optional dynamic autotuning.
 .IP \(bu 2
 \fBauto\fR: Intelligent auto-detection (opportunistic reflink -> io_uring/async -> sync).

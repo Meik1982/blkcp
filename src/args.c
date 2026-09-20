@@ -409,6 +409,11 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
               cfg->engine = ENGINE_REFLINK;
               cfg->conversions_mask |= C_REFLINK;
             }
+          else if (operand_matches (optarg, "splice", 0) || operand_matches (optarg, "pipe", 0))
+            {
+              cfg->engine = ENGINE_SPLICE;
+              cfg->conversions_mask |= C_SPLICE;
+            }
           else if (operand_matches (optarg, "sync", 0))
             {
               cfg->engine = ENGINE_SYNC;
@@ -419,7 +424,7 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
             }
           else
             {
-              error (EXIT_FAILURE, 0, _("unrecognized engine: %s (valid: sync, async, reflink, uring, auto)"), quoteaf (optarg));
+              error (EXIT_FAILURE, 0, _("unrecognized engine: %s (valid: sync, async, reflink, uring, splice, auto)"), quoteaf (optarg));
             }
           break;
         case 'l':
@@ -590,6 +595,11 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
                 {
                   cfg->conversions_mask |= C_URING;
                   cfg->engine = ENGINE_URING;
+                }
+              else if (operand_matches (tok, "splice", 0) || operand_matches (tok, "pipe", 0))
+                {
+                  cfg->conversions_mask |= C_SPLICE;
+                  cfg->engine = ENGINE_SPLICE;
                 }
               else
                 {

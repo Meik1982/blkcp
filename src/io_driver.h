@@ -74,6 +74,7 @@ extern const dd_io_driver_t async_io_driver;
 #if defined __linux__
 extern const dd_io_driver_t reflink_io_driver;
 extern const dd_io_driver_t uring_io_driver;
+extern const dd_io_driver_t splice_io_driver;
 #endif
 
 /**

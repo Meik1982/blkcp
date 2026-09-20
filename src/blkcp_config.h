@@ -51,7 +51,8 @@ enum dd_conversions
   C_SHA256 = 02000000,
   C_ASYNC = 04000000,
   C_REFLINK = 010000000,
-  C_URING = 020000000
+  C_URING = 020000000,
+  C_SPLICE = 040000000
 };
 
 /**
@@ -63,7 +64,8 @@ typedef enum blkcp_engine
   ENGINE_SYNC,        /**< Standard synchronous block I/O engine */
   ENGINE_ASYNC,       /**< Multi-threaded ringbuffer pipeline */
   ENGINE_REFLINK,     /**< Linux Kernel zero-copy copy_file_range */
-  ENGINE_URING        /**< Linux io_uring asynchronous execution */
+  ENGINE_URING,       /**< Linux io_uring asynchronous execution */
+  ENGINE_SPLICE       /**< Linux Kernel zero-copy splice engine */
 } blkcp_engine_t;
 
 #define FFS_MASK(x) ((x) ^ ((x) & ((x) - 1)))

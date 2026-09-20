@@ -62,6 +62,7 @@ Core Options:\n\
                              'async'    Multi-threaded ringbuffer pipeline\n\
                              'reflink'  Linux Kernel Zero-Copy (copy_file_range)\n\
                              'uring'    Linux io_uring asynchronous execution\n\
+                             'splice'   Linux Kernel Zero-Copy pipe splicing\n\
                              'auto'     Intelligent auto-detection (default)\n\
   -l, --limit=BYTES        Limit copy to exactly BYTES bytes (aliases: -s, --size)\n\
   -c, --count=N            Copy only N input blocks\n\

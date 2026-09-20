@@ -49,7 +49,7 @@ src/
 * `-i, --input <FILE>`: Eingabedatei oder Blockgerät (Default: `stdin`)
 * `-o, --output <FILE>`: Ausgabedatei oder Blockgerät (Default: `stdout`)
 * `-b, --block-size <SIZE>`: Blockgröße (z. B. `64K`, `4M`, `1G`); `-b auto` aktiviert dynamisches Autotuning
-* `-e, --engine <NAME>`: Transfer-Engine: `uring` (Linux io_uring), `async` (Pthread-Ringpuffer), `reflink` (Kernel Zero-Copy), `sync` (synchron), `auto` (intelligente Auto-Erkennung)
+* `-e, --engine <NAME>`: Transfer-Engine: `uring` (Linux io_uring), `async` (Pthread-Ringpuffer), `reflink` (Kernel Zero-Copy), `splice` (Kernel Pipe-Splice), `sync` (synchron), `auto` (intelligente Auto-Erkennung)
 * `-l, --limit <SIZE>` (auch `-s, --size`): Exakte Byte-Begrenzung entkoppelt von Blockgrößen
 * `-c, --count <N>`: Anzahl der zu kopierenden Blöcke
 * `-p, --progress`: Echtzeit-Durchsatzanzeige und Fortschrittsbalken
@@ -132,7 +132,7 @@ make all
 # Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
 make release
 
-# Erweiterte Regressionstest-Suite (30 Tests):
+# Erweiterte Regressionstest-Suite (31 Tests):
 make test
 
 # Vergleichende Performance-Benchmarks (13 Szenarien):

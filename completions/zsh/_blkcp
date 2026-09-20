@@ -6,6 +6,7 @@ _blkcp_engines() {
         'uring:Linux io_uring kernel async queue with read-ahead pipelining'
         'async:Multi-threaded pthread ringbuffer double-buffering'
         'reflink:Linux in-kernel zero-copy copy_file_range/reflink'
+        'splice:Linux in-kernel zero-copy pipe splice pipeline'
         'sync:Standard synchronous block I/O engine'
         'auto:Automatic optimal backend selection'
     )

@@ -18,6 +18,7 @@ typedef enum tui_engine_mode {
     TUI_ENGINE_URING,
     TUI_ENGINE_ASYNC,
     TUI_ENGINE_REFLINK,
+    TUI_ENGINE_SPLICE,
     TUI_ENGINE_SYNC,
     TUI_ENGINE_COUNT
 } tui_engine_mode_t;
@@ -35,6 +36,7 @@ typedef enum tui_field_id {
     FIELD_OF_SEARCH_DEV,
     FIELD_OF_SEARCH_PIPE,
     FIELD_ENGINE,
+    FIELD_QUEUE_DEPTH,
     FIELD_BS,
     FIELD_LIMIT,
     FIELD_COUNT,
@@ -63,6 +65,7 @@ typedef struct tui_form {
     bool of_is_pipe;
 
     tui_engine_mode_t engine;
+    char queue_depth[32];
     char bs[64];
     char limit[64];
     char count[64];

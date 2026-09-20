@@ -39,12 +39,16 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   Optionale strukturierte NDJSON-Fortschrittsausgabe für Skripte und CI/CD-Pipelines (`{"event": "progress", ...}` und `{"event": "finished", ...}`) mit Bytes, Prozent, Geschwindigkeit, ETA und Prüfsumme auf `stderr`. In Regressionstest 29 verifiziert.
 - [x] **Dynamic Ringbuffer Scaling (`--queue-depth`):**
   Adaptive Pufferanpassung im `io_async`-Treiber basierend auf Blockgröße und Ziel-Puffervolumen (32 MiB Working-Set, 4 bis 128 Slots). Manuelle Konfigurierbarkeit via `--queue-depth=N` / `--async-queue=N` (2 bis 1024 Slots), Graceful-Degradation-Fallback bei Speicherdruck und Erfassung von Reader-/Writer-Stalls in der NDJSON-Telemetrie. In Regressionstest 30 verifiziert.
+- [x] **Fixed-Buffer Pre-Registration (`io_uring`):**
+  Registrierung der Ringpuffer über `io_uring_register_buffers()` im `io_uring`-Treiber mit `io_uring_prep_read_fixed()` und `io_uring_prep_write_fixed()`. Beseitigt Page-Pinning (`get_user_pages`) und Kernel-Mapping-Overheads vollständig mit automatischem Fallback.
+- [x] **In-Kernel Zero-Copy Splice Engine (`-e splice` / `splice(2)`):**
+  Dedizierter Linux-Treiber `src/io_splice.c` für Pipes, FIFOs und Streams (`SPLICE_F_MOVE | SPLICE_F_MORE`). Beinhaltet Double-Splice über interne Kernel-Ringpuffer für File-to-File Transfers und nahtlosen Fallback bei FS-Inkompatibilitäten. In Regressionstest 31 verifiziert.
+- [x] **TUI-Assistent Erweiterungen (`blkcp-tui`):**
+  Unterstützung der `splice`-Engine, interaktives Einstellen der `--queue-depth` und Umschaltung auf NDJSON-Telemetrie (`--json`) inklusive 2D-Spatial-Tastaturnavigation.
 
 ---
 
 ## 2. Optionale zukünftige Erweiterungen
 
-- **Fixed-Buffer Pre-Registration (`io_uring`):**
-  Nutzung von `io_uring_register_buffers()` zur Eliminierung von Page-Pinning-Overheads bei wiederholten Übertragungszyklen.
-- **Adaptive I/O Splice Pipeline:**
-  Zero-Userspace-Kopieren für Pipes und FIFOs mittels `splice(2)` / `vmsplice(2)`.
+- **Multi-Ring io_uring Sharding:**
+  Paralleles Sharding mehrerer io_uring Submission-Rings über dedizierte CPU-Cores bei Multi-Queue NVMe-Controllern.

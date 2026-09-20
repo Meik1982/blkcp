@@ -288,7 +288,7 @@ main(void)
             else if (form.active_field == FIELD_OPT_SYNC)
                 form.opt_sync = !form.opt_sync;
             else if (form.active_field == FIELD_STATUS)
-                form.status_mode = (form.status_mode + 1) % 3;
+                form.status_mode = (form.status_mode + 1) % 4;
             break;
 
         case 10:
@@ -319,6 +319,8 @@ main(void)
                     form.of_is_pipe = true;
             } else if (form.active_field == FIELD_ENGINE) {
                 form.engine = (form.engine + 1) % TUI_ENGINE_COUNT;
+            } else if (form.active_field == FIELD_QUEUE_DEPTH) {
+                edit_text_modal("Ringbuffer Queue Depth (z.B. auto, 8, 16, 64, 128):", form.queue_depth, sizeof form.queue_depth);
             } else if (form.active_field == FIELD_BS) {
                 edit_text_modal("Block Size (-b, z.B. auto, 1M, 64k, 4M):", form.bs, sizeof form.bs);
             } else if (form.active_field == FIELD_LIMIT) {
@@ -342,7 +344,7 @@ main(void)
             } else if (form.active_field == FIELD_OPT_SYNC) {
                 form.opt_sync = !form.opt_sync;
             } else if (form.active_field == FIELD_STATUS) {
-                form.status_mode = (form.status_mode + 1) % 3;
+                form.status_mode = (form.status_mode + 1) % 4;
             } else if (form.active_field == FIELD_BTN_START) {
                 execute_blkcp_job(win, &form);
             } else if (form.active_field == FIELD_BTN_COPY) {

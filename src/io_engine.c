@@ -561,6 +561,10 @@ dd_select_io_driver (dd_context_t *ctx)
   /* 2. Explicit reflink / zero-copy request */
   if (ctx->cfg.engine == ENGINE_REFLINK || (ctx->cfg.conversions_mask & C_REFLINK))
     return &reflink_io_driver;
+
+  /* 2b. Explicit splice zero-copy request */
+  if (ctx->cfg.engine == ENGINE_SPLICE || (ctx->cfg.conversions_mask & C_SPLICE))
+    return &splice_io_driver;
 #endif
 
   /* 3. Explicit Async Pipeline or flag */
@@ -598,6 +602,19 @@ dd_select_io_driver (dd_context_t *ctx)
 
       if (is_in_blk || is_out_blk || is_direct)
         return &uring_io_driver;
+    }
+
+  /* 7. Opportunistic zero-copy kernel splice when either end is a FIFO/pipe */
+  if (!(ctx->cfg.conversions_mask & incompatible)
+      && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
+      && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
+      && !(ctx->cfg.output_flags & (O_DIRECT | O_NOCACHE)))
+    {
+      struct stat st_in, st_out;
+      bool in_pipe = (fstat (STDIN_FILENO, &st_in) == 0 && S_ISFIFO (st_in.st_mode));
+      bool out_pipe = (fstat (STDOUT_FILENO, &st_out) == 0 && S_ISFIFO (st_out.st_mode));
+      if (in_pipe || out_pipe)
+        return &splice_io_driver;
     }
 #endif
 

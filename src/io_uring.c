@@ -79,6 +79,7 @@ typedef struct uring_driver_state
   bool write_in_flight;         /**< True if an asynchronous write SQE is active */
   bool read_eof;                /**< True if input reached end-of-file */
   bool pipeline_primed;         /**< True once initial read-ahead is submitted */
+  bool buffers_registered;      /**< True if kernel fixed buffers registered via io_uring_register_buffers */
 } uring_driver_state_t;
 
 /**
@@ -152,6 +153,18 @@ uring_driver_init (dd_context_t *ctx, void **state)
       st->slots[i].buf = (char *) ptr;
     }
 
+  /* Pre-register fixed buffers in kernel to eliminate per-I/O get_user_pages() overhead */
+  struct iovec iov[URING_NUM_BUFFERS];
+  for (int i = 0; i < URING_NUM_BUFFERS; i++)
+    {
+      iov[i].iov_base = st->slots[i].buf;
+      iov[i].iov_len = st->slots[i].capacity;
+    }
+  if (io_uring_register_buffers (&st->ring, iov, URING_NUM_BUFFERS) == 0)
+    st->buffers_registered = true;
+  else
+    st->buffers_registered = false;
+
   st->read_slot = 0;
   st->write_slot = 0;
   st->read_in_flight = false;
@@ -209,10 +222,12 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
           return EXIT_FAILURE;
         }
 
-      if (st->in_seekable)
-        io_uring_prep_read (sqe, STDIN_FILENO, st->slots[0].buf, first_read, st->in_file_pos);
+      if (st->buffers_registered)
+        io_uring_prep_read_fixed (sqe, STDIN_FILENO, st->slots[0].buf, first_read,
+                                  st->in_seekable ? (uint64_t) st->in_file_pos : (uint64_t) -1, 0);
       else
-        io_uring_prep_read (sqe, STDIN_FILENO, st->slots[0].buf, first_read, -1);
+        io_uring_prep_read (sqe, STDIN_FILENO, st->slots[0].buf, first_read,
+                            st->in_seekable ? st->in_file_pos : -1);
 
       sqe->user_data = TAG_READ;
       st->read_in_flight = true;
@@ -344,10 +359,18 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
         }
     }
 
-  if (st->out_seekable)
-    io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, st->out_file_pos);
+  if (st->buffers_registered)
+    io_uring_prep_write_fixed (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf,
+                               bytes_to_write,
+                               st->out_seekable ? (uint64_t) st->out_file_pos : (uint64_t) -1,
+                               cur_write_slot);
   else
-    io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, -1);
+    {
+      if (st->out_seekable)
+        io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, st->out_file_pos);
+      else
+        io_uring_prep_write (sqe_w, STDOUT_FILENO, st->slots[cur_write_slot].buf, bytes_to_write, -1);
+    }
 
   sqe_w->user_data = TAG_WRITE;
   st->write_in_flight = true;
@@ -365,10 +388,18 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
           struct io_uring_sqe *sqe_r = io_uring_get_sqe (&st->ring);
           if (sqe_r)
             {
-              if (st->in_seekable)
-                io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, st->in_file_pos);
+              if (st->buffers_registered)
+                io_uring_prep_read_fixed (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf,
+                                          next_read_size,
+                                          st->in_seekable ? (uint64_t) st->in_file_pos : (uint64_t) -1,
+                                          next_read_slot);
               else
-                io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, -1);
+                {
+                  if (st->in_seekable)
+                    io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, st->in_file_pos);
+                  else
+                    io_uring_prep_read (sqe_r, STDIN_FILENO, st->slots[next_read_slot].buf, next_read_size, -1);
+                }
 
               sqe_r->user_data = TAG_READ;
               st->read_in_flight = true;
@@ -448,6 +479,11 @@ uring_driver_cleanup (dd_context_t *ctx, void *state)
 
   if (st->ring_initialized)
     {
+      if (st->buffers_registered)
+        {
+          io_uring_unregister_buffers (&st->ring);
+          st->buffers_registered = false;
+        }
       io_uring_queue_exit (&st->ring);
       st->ring_initialized = false;
     }

@@ -15,7 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include <stdckdint.h>
+#if defined __has_include && __has_include (<stdckdint.h>)
+# include <stdckdint.h>
+#else
+# include "stdckdint.in.h"
+#endif
 
 #include "configmake.h"
 #include "propername.h"

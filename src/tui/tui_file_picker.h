@@ -7,6 +7,7 @@
 #define TUI_FILE_PICKER_H
 
 #include <stddef.h>
+#include <stdbool.h>
 
 /**
  * @brief Opens an interactive ncurses modal to choose a file or directory

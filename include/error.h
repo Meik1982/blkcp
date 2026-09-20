@@ -392,6 +392,9 @@
    It evaluates its arguments only once.
    Test case: Compile copy-file.c with "gcc -Wimplicit-fallthrough".  */
 #if defined __GNUC__ || defined __clang__
+# ifndef unreachable
+#  define unreachable() __builtin_unreachable()
+# endif
 /* Use 'unreachable' to tell the compiler when the function call does not
    return.  */
 # define __gl_error_call1(function, status, ...) \

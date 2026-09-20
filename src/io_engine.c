@@ -586,9 +586,22 @@ dd_select_io_driver (dd_context_t *ctx)
           && fstat (STDOUT_FILENO, &st_out) == 0 && S_ISREG (st_out.st_mode))
         return &reflink_io_driver;
     }
+
+  /* 6. Opportunistic io_uring pipeline when engine == ENGINE_AUTO */
+  /* If either stream is a block device or direct I/O is requested */
+  if (!(ctx->cfg.conversions_mask & (C_ASCII | C_EBCDIC | C_IBM | C_BLOCK | C_UNBLOCK | C_LCASE | C_UCASE | C_SWAB | C_AUTOTUNE)))
+    {
+      struct stat st_in, st_out;
+      bool is_in_blk = (fstat (STDIN_FILENO, &st_in) == 0 && S_ISBLK (st_in.st_mode));
+      bool is_out_blk = (fstat (STDOUT_FILENO, &st_out) == 0 && S_ISBLK (st_out.st_mode));
+      bool is_direct = (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT);
+
+      if (is_in_blk || is_out_blk || is_direct)
+        return &uring_io_driver;
+    }
 #endif
 
-  /* 6. Default standard synchronous driver */
+  /* 7. Default standard synchronous driver */
   return &sync_io_driver;
 }
 

@@ -58,6 +58,8 @@ tui: $(TARGET_TUI)
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man/man1
+BASHCOMPDIR ?= $(PREFIX)/share/bash-completion/completions
+ZSHCOMPDIR ?= $(PREFIX)/share/zsh/site-functions
 
 install: release
 	install -d $(DESTDIR)$(BINDIR)
@@ -65,6 +67,18 @@ install: release
 	install -m 755 $(TARGET_TUI) $(DESTDIR)$(BINDIR)/$(TARGET_TUI)
 	install -d $(DESTDIR)$(MANDIR)
 	install -m 644 man/blkcp.1 $(DESTDIR)$(MANDIR)/blkcp.1
+	install -d $(DESTDIR)$(BASHCOMPDIR)
+	install -m 644 completions/bash/blkcp $(DESTDIR)$(BASHCOMPDIR)/blkcp
+	install -d $(DESTDIR)$(ZSHCOMPDIR)
+	install -m 644 completions/zsh/_blkcp $(DESTDIR)$(ZSHCOMPDIR)/_blkcp
 	@echo "=== Installation erfolgreich in $(DESTDIR)$(BINDIR) abgeschlossen ==="
 
-.PHONY: all release clean test benchmark man tui install
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET_TUI)
+	rm -f $(DESTDIR)$(MANDIR)/blkcp.1
+	rm -f $(DESTDIR)$(BASHCOMPDIR)/blkcp
+	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_blkcp
+	@echo "=== Deinstallation erfolgreich abgeschlossen ==="
+
+.PHONY: all release clean test benchmark man tui install uninstall

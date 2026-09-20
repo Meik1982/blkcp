@@ -1,0 +1,48 @@
+name: blkcp CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Release (-O3, -flto)
+            build_cmd: make release
+            cflags: ""
+            ldflags: ""
+          - name: AddressSanitizer & UndefinedBehaviorSanitizer
+            build_cmd: make CFLAGS="-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=address,undefined"
+            cflags: "-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP"
+            ldflags: "-fsanitize=address,undefined"
+          - name: ThreadSanitizer
+            build_cmd: make CFLAGS="-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=thread"
+            cflags: "-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP"
+            ldflags: "-fsanitize=thread"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential liburing-dev libssl-dev libncurses-dev
+
+      - name: Compile blkcp and blkcp-tui
+        run: ${{ matrix.build_cmd }}
+
+      - name: Run test suite (32 tests)
+        run: ./tests/run_tests.sh
+
+      - name: Verify CLI options & version output
+        run: |
+          ./blkcp --version
+          ./blkcp --help

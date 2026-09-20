@@ -1,0 +1,27 @@
+# Authors & Heritage of blkcp
+
+## Project Lead & Modernization Architect
+* **Meik** (GitHub: @Meik1982)
+  - Modular C architecture and I/O driver abstraction (`dd_io_driver_t`)
+  - Linux `io_uring` native asynchronous engine with fixed-buffer registration and userspace batch reaping
+  - In-kernel zero-copy reflink (`copy_file_range(2)`) and splice (`splice(2)`) engines
+  - Multi-threaded ringbuffer engine (`io_async`) with dynamic queue-depth scaling
+  - 2D-Spatial Terminal User Interface (`blkcp-tui`) in ncursesw
+  - Modern POSIX/GNU CLI parser (`getopt_long`) and complete removal of legacy `key=value` operands
+  - Target Safety Guard for active mounts (`/proc/mounts`) and system swap devices (`/proc/swaps`)
+  - AVX2 / SSSE3 SIMD vectorization for endian byte swapping (`--swab`)
+  - High-throughput autotuning (`-b auto`) and vDSO clock throttling
+  - In-flight hardware-accelerated SHA-256 digest engine and NDJSON streaming telemetry
+
+## Heritage & Foundational Code
+`blkcp` originated as a ground-up modular reimplementation and modernization of the historical `dd` utility from the GNU Coreutils suite.
+
+Foundational coreutils routines, diagnostic formatting, and portability layers were written by:
+* Paul Rubin
+* David MacKenzie
+* Stuart Kemp
+* Jim Meyering
+* Pádraig Brady
+* and numerous contributors to the GNU Coreutils project.
+
+`blkcp` is distributed under the terms of the GNU General Public License v3 or later (GPL-3.0-or-later).

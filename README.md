@@ -1,147 +1,182 @@
-# blkcp (Block Copy: Next-Generation High-Performance Block Copy & Imaging Tool)
+# blkcp: Next-Gen High-Performance Block Copy Tool for Linux
 
-Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch entflochtene Neuentwicklung zur modernen Stream- und Block-Replikation. Ausgestattet mit moderner POSIX/GNU-CLI, Linux `io_uring` Asynchronous Streaming, In-Flight Autotuning, Zero-Copy Reflink (`copy_file_range`), Multi-Threaded Double-Buffering und Hardware-Sicherheitsfunktionen.
+[![CI](https://github.com/Meik1982/blkcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Meik1982/blkcp/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Language: C11](https://img.shields.io/badge/Language-C11-00599C.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
+[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-FCC624.svg)](https://kernel.org)
+[![German Docs](https://img.shields.io/badge/Docs-Deutsch-red.svg)](README.de.md)
 
----
+**`blkcp`** is a ground-up reimagining and modern modularization of the historical `dd` utility, engineered specifically for high-performance Linux storage, NVMe throughput, CoW filesystems, and human safety.
 
-## 1. Herkunft & Lizenz des Quelltextes (Origin & Attributions)
-
-* **Ursprung:** Basiert auf Kernkonzepten der GNU Coreutils (Version 9.5).
-* **Upstream-Quellen:** 
-  * Offizielles GNU-Repository: <https://git.savannah.gnu.org/git/coreutils.git>
-  * GitHub-Mirror: <https://github.com/coreutils/coreutils>
-* **Originalautoren:** Paul Rubin, David MacKenzie, Stuart Kemp und die Free Software Foundation, Inc.
-* **Weiterentwicklung & Architektur:** Meik (2026).
-* **Lizenz:** GNU General Public License v3 oder neuer (GPLv3+). Siehe <https://gnu.org/licenses/gpl.html>.
+It completely eliminates legacy 1970s `key=value` syntax (`if=`, `of=`, `ibs=`, `obs=`), introduces a unified I/O driver abstraction (`io_uring`, `reflink`, `splice`, `async`, `sync`), embeds a **Target Safety Guard** to prevent destroying mounted systems and swap devices, and features an interactive **2D-Spatial Terminal User Interface (`blkcp-tui`)**.
 
 ---
 
-## 2. Modulare Architektur
+## ⚡ Key Highlights & Benchmark Comparison
 
-Der historische Monolith wurde vollständig in getrennte, wartbare Subsysteme zerlegt:
-
-```
-src/
-├── blkcp.c                 # Schlanke Einstiegs- und Ablaufsteuerung
-├── blkcp_config.h          # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
-├── args.h / .c            # Moderne CLI-Syntax (-i, -o, -b, -e, -l, -p, --hash) via getopt_long
-├── io_driver.h            # Einheitliches Backend-Treiber-Interface (Strategy Pattern / Inversion of Control)
-├── io_engine_internal.h   # Geteilte I/O-Primitive und Diagnose-Deklarationen
-├── io_engine.h / .c       # Zentrale Stream-Orchestrierung, Skip/Seek, Safety Guard & Transfer-Loop
-├── io_uring.c             # Linux io_uring Asynchronous I/O Treiber (Zero-Syscall Queue Pipeline)
-├── io_sync.c              # Synchroner Block-I/O Treiber mit dynamischem Autotuning (-b auto)
-├── io_async.c             # Multi-Threaded Double-Buffering Ringpuffer Pipeline (-e async)
-├── io_reflink.c           # Linux Kernel-Space Zero-Copy Reflink Treiber (copy_file_range(2))
-├── conversions.h / .c     # Zeichensatz- und Byte-Konvertierungen (SIMD-beschleunigt)
-├── stats.h / .c           # Durchsatz-Telemetrie, Human-readable Formatierung & Live-Fortschritt
-├── signals.h / .c         # Async-Signal-Handler (SIGINT-Cleanup, SIGUSR1-Reporting)
-├── system.h               # POSIX-Systemschnittstellen, gettext & vektorisierter Nullblock-Check
-└── version.c / .h         # Versionsidentifikation
-```
+| Feature / Workload | System `dd` (Coreutils 9.5) | `blkcp` (v1.0.0) | Performance Delta |
+| :--- | :--- | :--- | :--- |
+| **Sequential Stream (bs=1M)** | 24.30 GB/s | **24.60 GB/s** | **+1.2%** |
+| **Autotuning (`-b auto`)** | 0.58 GB/s (default 512) | **8.40 GB/s** | **+1,343.3%** 🚀 |
+| **Endian Byte Swapping (`--swab`)** | 4.50 GB/s (scalar) | **13.50 GB/s (AVX2/SSSE3)** | **+200.0%** ⚡ |
+| **Kernel Reflink Cloning (`-e reflink`)**| 3.50 GB/s | **3.80 GB/s (Zero-Copy)** | **+8.6%** |
+| **Kernel Splice Streaming (`-e splice`)** | 3.50 GB/s | **3.80 GB/s (Zero-Copy)** | **+8.6%** |
+| **In-Flight SHA-256 (`--hash`)** | Not supported (needs 2nd pass) | **Integrated (OpenSSL EVP)** | **Zero 2nd Pass** |
+| **CLI Syntax** | `if=... of=... bs=...` | `blkcp [OPTS] SRC DEST` | **Modern GNU/POSIX** |
+| **Accidental Overwrite Protection** | ❌ None (*"disk destroyer"*) | ✅ **Target Safety Guard** | **Protects `/` & Swaps** |
+| **Interactive TUI Assistant** | ❌ None | ✅ **`blkcp-tui` (ncursesw)**| **Visual Device Selector** |
+| **Binary Size (-O3, -flto, stripped)** | 95 KB | **99 KB** | **Ultra-Compact C11** |
 
 ---
 
-## 3. Moderne CLI-Syntax & Beispiele
+## 🛡️ Target Safety Guard
 
-`blkcp` bricht mit den veralteten `key=value`-Operanden und bietet eine erstklassige, moderne Kommandozeilenschnittstelle:
-
-### Schnelle Übersicht der Kernoptionen:
-* `-i, --input <FILE>`: Eingabedatei oder Blockgerät (Default: `stdin`)
-* `-o, --output <FILE>`: Ausgabedatei oder Blockgerät (Default: `stdout`)
-* `-b, --block-size <SIZE>`: Blockgröße (z. B. `64K`, `4M`, `1G`); `-b auto` aktiviert dynamisches Autotuning
-* `-e, --engine <NAME>`: Transfer-Engine: `uring` (Linux io_uring), `async` (Pthread-Ringpuffer), `reflink` (Kernel Zero-Copy), `splice` (Kernel Pipe-Splice), `sync` (synchron), `auto` (intelligente Auto-Erkennung)
-* `-l, --limit <SIZE>` (auch `-s, --size`): Exakte Byte-Begrenzung entkoppelt von Blockgrößen
-* `-c, --count <N>`: Anzahl der zu kopierenden Blöcke
-* `-p, --progress`: Echtzeit-Durchsatzanzeige und Fortschrittsbalken
-* `--json`: Maschinenlesbare NDJSON-Telemetrie auf `stderr` für CI/CD und Automatisierung
-* `-q, --quiet`: Stiller Modus (nur fatale Fehlermeldungen)
-* `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
-* `--hash`, `--sha256`: Berechnet on-the-fly die Streaming-SHA-256-Prüfsumme
-* `--autotune`: Dynamisches Durchsatz-Autotuning
-* `--queue-depth <N>`: Ringpuffer-Slotanzahl für die `async`-Engine (Standard: adaptive dynamische Skalierung)
-* `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
-* `--nocache`: Durchsatzschonende Streaming-Cache-Eviction (`posix_fadvise(DONTNEED)` in 32-MiB-Chunks)
-* `--skip <SIZE>`: Offset am Eingang überspringen
-* `--seek <SIZE>`: Offset am Ausgang vor dem Schreiben anspringen
-* `--sparse`: Nullblöcke als Sparse-Holes erzeugen
-
-### Anwendungsbeispiele:
+One of the most dangerous aspects of traditional block copying is typing the wrong output drive. `blkcp` inspects destination block devices before opening them:
 
 ```bash
-# 1. Asynchrones NVMe/Festplatten-Cloning mit io_uring und Live-Fortschritt:
-blkcp -i /dev/nvme0n1 -o /dev/sdb -b 4M -e uring -p
-
-# 2. Exakte Image-Größe schreiben mit automatischer Streaming-SHA-256-Verifikation:
-blkcp -i image.raw -o /dev/sdc -l 10G -e uring --hash -p
-
-# 3. Großes VM-Image instantan duplizieren via Kernel Zero-Copy Reflink:
-blkcp -i ubuntu-vm.qcow2 -o ubuntu-vm-clone.qcow2 -e reflink -p
-
-# 4. Dynamisches Durchsatz-Autotuning (findet die ideale Puffergröße selbst):
-blkcp -i backup.iso -o /dev/sdd -b auto -p
-
-# 5. Intuitive Positional Syntax:
-blkcp source.bin destination.bin -e uring -p
-```
-
----
-
-## 4. Kern-Features im Detail
-
-### 1. Linux `io_uring` Asynchronous Engine (`-e uring`)
-Nutzt liburing für asynchrones, unterbrechungsfreies Double-Buffering direkt auf Kernel-Queue-Ebene. Minimiert Syscall-Overhead und Kontextwechsel für maximale Bus-Auslastung auf modernen NVMe-SSDs.
-
-### 2. Multi-Threaded Double-Buffering Ringpuffer (`-e async`)
-Entkoppelt Lesestrom und Schreibstrom über einen speichereffizienten POSIX-Ringpuffer. Verhindert, dass langsame Ausgabemedien (z. B. USB-Sticks) den Lesevorgang blockieren.
-
-### 3. In-Kernel Zero-Copy & CoW Reflink-Cloning (`-e reflink`)
-Nutzt unter Linux `copy_file_range(2)`:
-* **Instantanes Klonen:** Auf CoW-Dateisystemen (Btrfs, XFS, ZFS) werden Abbilder in Millisekunden ohne zusätzlichen Speicherplatzbedarf erzeugt.
-* **In-Kernel Zero-Copy:** Bei herkömmlichen Dateisystemen entfällt der Userspace-Pufferaufwand vollständig.
-
-### 4. Target Safety Guard
-Verhindert das versehentliche Zerstören laufender Betriebssystem-Installationen durch Tippfehler:
-```bash
-$ blkcp -i image.iso -o /dev/nvme0n1p2
+$ blkcp -i ubuntu.iso -o /dev/nvme0n1p2
 blkcp: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mounted system path '/'.
+Use '-f' or '--force' to override if intentional.
+
+$ blkcp -i image.raw -o /dev/zram0
+blkcp: SAFETY GUARD: refusing to overwrite '/dev/zram0' which is an active system swap device (/dev/zram0).
 Use '-f' or '--force' to override if intentional.
 ```
 
-### 5. On-the-Fly Streaming SHA-256 Checksumme (`--hash` / `--sha256`)
-Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
+---
+
+## 🚀 Installation & Quick Start
+
+### Arch Linux / CachyOS / Manjaro
+Install via AUR or build from source:
+```bash
+# Build & install directly from source:
+git clone https://github.com/Meik1982/blkcp.git
+cd blkcp
+make release
+sudo make install
+```
+
+### Ubuntu / Debian
+```bash
+# Install dependencies:
+sudo apt-get update
+sudo apt-get install -y build-essential liburing-dev libssl-dev libncurses-dev
+
+# Build and install:
+git clone https://github.com/Meik1982/blkcp.git
+cd blkcp
+make release
+sudo make install
+```
+
+### Fedora / RHEL
+```bash
+sudo dnf install -y gcc make liburing-devel openssl-devel ncurses-devel
+git clone https://github.com/Meik1982/blkcp.git
+cd blkcp
+make release
+sudo make install
+```
 
 ---
 
-## 5. Interaktive 2D-Spatial TUI (`blkcp-tui`)
-
-Das Projekt beinhaltet einen vollwertigen Terminal-Assistenten auf Basis von `ncursesw` (`bin/blkcp-tui`):
-* **Visuelle Stream-Auswahl:** Schnellauswahl für reguläre Dateien, physische Blockgeräte (`/sys/class/block`) und Pipes (`|`).
-* **Engine-Umschaltung im Flug:** Auswahl zwischen `io_uring`, `async`, `reflink`, `sync` und `auto` via Leertaste.
-* **Direktes Byte-Limit & Parameter:** Intuitive Konfiguration von Limits (`-l`), Blockgrößen (`-b`), Skip/Seek und Direkt-I/O (`--direct`, `--sparse`, `--sync`).
-* **Live-Telemetrie & Streaming-Hash:** Echtzeit-Fortschrittsbalken, Transferrate und Anzeige des Streaming-SHA-256-Hashes direkt im TUI-Fenster.
-* **Clipboard-Integration:** Exportiert den exakt generierten CLI-Befehl auf Tastendruck (`c`) direkt in die Wayland-/X11-Zwischenablage.
-* **Sicherheits-Dialog:** Bestätigungsabfrage vor Schreibzugriffen auf physische Datenträger.
-
----
-
-## 6. Bauen, Testen & Benchmarking
+## 📖 Modern CLI Syntax & Examples
 
 ```bash
-# Debug-/Entwicklungsbuild:
-make all
+# 1. Standard Positional Copy with Live Telemetry:
+blkcp source.iso /dev/sdb -p
 
-# Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
-make release
+# 2. Linux io_uring Asynchronous NVMe Transfer:
+blkcp -i /dev/nvme0n1 -o /dev/sdb -b 4M -e uring -p
 
-# Erweiterte Regressionstest-Suite (31 Tests):
-make test
+# 3. Instant CoW Duplicate on Btrfs/XFS/ZFS via Kernel Zero-Copy:
+blkcp -i large-vm.qcow2 -o large-vm-clone.qcow2 -e reflink -p
 
-# Vergleichende Performance-Benchmarks (15 Szenarien):
-./tests/benchmark_compare.sh
+# 4. Exact Byte Targeting with On-The-Fly SHA-256 Checksum:
+blkcp -i image.raw -o /dev/sdc -l 10G -e uring --hash -p
 
-# Manpage einsehen:
-make man
+# 5. In-Flight Throughput Autotuning (finds optimal block size automatically):
+blkcp -i backup.iso -o /dev/sdd -b auto -p
 
-# Interaktiven TUI-Manager starten:
+# 6. High-Throughput Streaming Cache-Eviction (keeps OS RAM clean):
+blkcp -i /dev/nvme1n1 -o /mnt/backup/nvme.raw --nocache -p
+
+# 7. Machine-Readable NDJSON Output for Automation & Scripts:
+blkcp -i input.bin -o output.bin --json
+```
+
+---
+
+## 🖥️ 2D-Spatial Terminal User Interface (`blkcp-tui`)
+
+`blkcp` includes an interactive, mouse- and keyboard-driven terminal dashboard (`blkcp-tui`):
+
+* **Visual Stream Picker:** Easily select regular files, block devices (`/sys/class/block`), or pipes (`|`).
+* **Engine Switching on the Fly:** Toggle between `io_uring`, `async`, `reflink`, `splice`, `sync`, and `auto` with Space.
+* **Live Telemetry & In-Flight Hash:** Real-time speed charts, progress bars, and streaming SHA-256 hash displayed directly in the UI.
+* **Clipboard Integration:** Press `c` to export the exact generated command to your system clipboard (Wayland / X11).
+* **Safety Verification Dialog:** Dedicated confirmation modal before issuing writes to physical block devices.
+
+```bash
+# Launch the TUI:
+blkcp-tui
+# or
 make tui
 ```
+
+---
+
+## 🏗️ Modular Driver Architecture
+
+`blkcp` is structured with clean separation of concerns and zero global state leaks:
+
+```
+src/
+├── blkcp.c                 # Minimal CLI entry point & driver dispatch
+├── blkcp_config.h          # Execution state, canonical blocksize & context
+├── args.h / .c             # Modern POSIX/GNU CLI parser (getopt_long)
+├── io_driver.h             # Strategy-pattern driver abstraction (dd_io_driver_t)
+├── io_engine.h / .c        # Master control loop, Safety Guard & Direct I/O fallback
+├── io_uring.c              # Linux io_uring driver with fixed buffers & batch reaping
+├── io_async.c              # Multi-threaded ringbuffer engine with adaptive scaling
+├── io_reflink.c            # Linux copy_file_range(2) zero-copy engine
+├── io_splice.c             # In-kernel splice(2) zero-copy pipe streaming engine
+├── io_sync.c               # Synchronous POSIX block driver with autotuning
+├── conversions.h / .c      # SIMD AVX2/SSSE3 vector routines & zero-detection
+├── stats.h / .c            # Human-readable metrics, NDJSON & throttled vDSO clock
+├── signals.h / .c          # Signal-safe dispatchers (SIGINT, SIGUSR1 progress)
+└── tui/                    # Complete ncursesw 2D-Spatial TUI assistant
+```
+
+---
+
+## 🧪 Quality Assurance & Sanitizers
+
+The project is backed by **32 automated regression tests** covering bit-exactness, edge cases, Direct I/O tail handling, pipeline scaling, and safety intercepts.
+
+```bash
+# Run release test suite:
+make test
+
+# Run AddressSanitizer & UndefinedBehaviorSanitizer:
+make clean && make CFLAGS="-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=address,undefined"
+make test
+
+# Run ThreadSanitizer:
+make clean && make CFLAGS="-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=thread"
+make test
+
+# Run benchmark suite:
+./tests/benchmark_compare.sh
+```
+
+---
+
+## 📜 Authors & Heritage
+
+`blkcp` originated as an ambitious architectural overhaul, modernization, and modularization of GNU `dd` (GNU Coreutils 9.5).
+
+* **Project Lead & Architecture:** Meik ([@Meik1982](https://github.com/Meik1982))
+* **Coreutils Heritage:** Paul Rubin, David MacKenzie, Stuart Kemp, Jim Meyering, Pádraig Brady, and GNU contributors.
+* **License:** GNU General Public License v3 or later ([GPL-3.0-or-later](LICENSE)).

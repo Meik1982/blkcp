@@ -151,6 +151,13 @@ dpkg-buildpackage -us -uc -b
 sudo apt install ../blkcp_1.0.0-1_amd64.deb
 ```
 
+### Fedora / RHEL / openSUSE
+**Empfohlen (Fertiges `.rpm`-Paket via `dnf`):**
+Lade `blkcp-1.0.0-1.x86_64.rpm` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+```bash
+sudo dnf install ./blkcp-1.0.0-1.x86_64.rpm
+```
+
 ### Manuelle Installation aus dem Quellcode (alle Distributionen):
 ```bash
 cd blkcp

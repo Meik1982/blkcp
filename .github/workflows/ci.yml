@@ -82,3 +82,40 @@ jobs:
           if gh release view v1.0.0 >/dev/null 2>&1; then
             gh release upload v1.0.0 dist/*.deb --clobber
           fi
+
+  package-rpm:
+    name: Build Fedora/RHEL Package (.rpm)
+    runs-on: ubuntu-24.04
+    container: fedora:latest
+    needs: build-and-test
+    steps:
+      - name: Install git and tar
+        run: dnf install -y git tar rpm-build gcc make liburing-devel openssl-devel ncurses-devel gh
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Mark safe git directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Build RPM Package
+        run: |
+          mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          tar --transform 's,^\.,blkcp-1.0.0,' --exclude='.git' --exclude='packaging/arch/src' --exclude='packaging/arch/pkg' -czf ~/rpmbuild/SOURCES/v1.0.0.tar.gz .
+          rpmbuild -ba packaging/rpm/blkcp.spec
+          mkdir -p dist
+          cp ~/rpmbuild/RPMS/*/*.rpm dist/
+
+      - name: Upload .rpm Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blkcp-rpm
+          path: dist/*.rpm
+
+      - name: Attach .rpm to Release (if release exists)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view v1.0.0 >/dev/null 2>&1; then
+            gh release upload v1.0.0 dist/*.rpm --clobber
+          fi

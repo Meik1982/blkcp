@@ -79,7 +79,14 @@ dpkg-buildpackage -us -uc -b
 sudo apt install ../blkcp_1.0.0-1_amd64.deb
 ```
 
-### Fedora / RHEL
+### Fedora / RHEL / openSUSE
+**Recommended (Install pre-built `.rpm` package):**
+Download `blkcp-1.0.0-1.x86_64.rpm` from [GitHub Releases](https://github.com/Meik1982/blkcp/releases) and install via `dnf`:
+```bash
+sudo dnf install ./blkcp-1.0.0-1.x86_64.rpm
+```
+
+*(Or build manually from source):*
 ```bash
 sudo dnf install -y gcc make liburing-devel openssl-devel ncurses-devel
 git clone https://github.com/Meik1982/blkcp.git

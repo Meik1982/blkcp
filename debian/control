@@ -1,0 +1,23 @@
+Source: blkcp
+Section: utils
+Priority: optional
+Maintainer: Meik <meik@github.com>
+Build-Depends: debhelper-compat (= 13),
+               gcc,
+               make,
+               liburing-dev,
+               libssl-dev,
+               libncurses-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/Meik1982/blkcp
+Rules-Requires-Root: no
+
+Package: blkcp
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Next-Gen High-Performance Block Copy Tool for Linux
+ blkcp is a ground-up reimagining and modern modularization of the
+ historical dd utility, engineered specifically for high-performance
+ Linux storage, NVMe throughput, CoW filesystems, and human safety.
+ Features 5 I/O engines (io_uring, async ringbuffer, reflink CoW, splice,
+ sync), Target Safety Guard, and an interactive 2D spatial TUI (blkcp-tui).

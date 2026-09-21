@@ -135,6 +135,22 @@ makepkg -si
 ```
 *Vorteil:* Das Paket wird vom Paketmanager `pacman` erfasst, sauber verwaltet und lässt sich jederzeit rückstandslos mit `sudo pacman -R blkcp` deinstallieren.
 
+### Ubuntu / Debian
+**Empfohlen (Fertiges `.deb`-Paket via `apt`):**
+Lade `blkcp_1.0.0-1_amd64.deb` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+```bash
+sudo apt install ./blkcp_1.0.0-1_amd64.deb
+```
+
+*(Oder selbst ein natives `.deb`-Paket aus dem Quellcode bauen):*
+```bash
+git clone https://github.com/Meik1982/blkcp.git
+cd blkcp
+sudo apt-get update && sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../blkcp_1.0.0-1_amd64.deb
+```
+
 ### Manuelle Installation aus dem Quellcode (alle Distributionen):
 ```bash
 cd blkcp

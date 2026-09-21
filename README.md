@@ -64,16 +64,19 @@ sudo make install
 ```
 
 ### Ubuntu / Debian
+**Recommended (Install pre-built `.deb` package):**
+Download `blkcp_1.0.0-1_amd64.deb` from [GitHub Releases](https://github.com/Meik1982/blkcp/releases) and install via `apt`:
 ```bash
-# Install dependencies:
-sudo apt-get update
-sudo apt-get install -y build-essential liburing-dev libssl-dev libncurses-dev
+sudo apt install ./blkcp_1.0.0-1_amd64.deb
+```
 
-# Build and install:
+*(Or build your own native `.deb` package from source):*
+```bash
 git clone https://github.com/Meik1982/blkcp.git
 cd blkcp
-make release
-sudo make install
+sudo apt-get update && sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
+dpkg-buildpackage -us -uc -b
+sudo apt install ../blkcp_1.0.0-1_amd64.deb
 ```
 
 ### Fedora / RHEL

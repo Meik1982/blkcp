@@ -48,10 +48,16 @@ Use '-f' or '--force' to override if intentional.
 ## 🚀 Installation & Quick Start
 
 ### Arch Linux / CachyOS / Manjaro
-Install via AUR or build from source:
+**Recommended (Clean installation managed by `pacman`):**
 ```bash
-# Build & install directly from source:
 git clone https://github.com/Meik1982/blkcp.git
+cd blkcp/packaging/arch
+makepkg -si
+```
+*(The package is compiled, dependencies are resolved, and it is tracked cleanly by the `pacman` database — removable anytime via `sudo pacman -R blkcp`.)*
+
+Alternatively, build and install manually from source:
+```bash
 cd blkcp
 make release
 sudo make install

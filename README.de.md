@@ -124,7 +124,27 @@ Das Projekt beinhaltet einen vollwertigen Terminal-Assistenten auf Basis von `nc
 
 ---
 
-## 6. Bauen, Testen & Benchmarking
+## 6. Installation & Paketverwaltung
+
+### Arch Linux / CachyOS / Manjaro
+**Empfohlen (Sauber verwaltet über `pacman` mit PKGBUILD):**
+```bash
+git clone https://github.com/Meik1982/blkcp.git
+cd blkcp/packaging/arch
+makepkg -si
+```
+*Vorteil:* Das Paket wird vom Paketmanager `pacman` erfasst, sauber verwaltet und lässt sich jederzeit rückstandslos mit `sudo pacman -R blkcp` deinstallieren.
+
+### Manuelle Installation aus dem Quellcode (alle Distributionen):
+```bash
+cd blkcp
+make release
+sudo make install
+```
+
+---
+
+## 7. Bauen, Testen & Benchmarking
 
 ```bash
 # Debug-/Entwicklungsbuild:

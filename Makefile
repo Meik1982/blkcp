@@ -20,9 +20,9 @@ all: $(TARGET) $(TARGET_TUI)
 	@cp -f $(TARGET) bin/$(TARGET)
 	@cp -f $(TARGET_TUI) bin/$(TARGET_TUI)
 
-release: CFLAGS = -O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
-release: LDFLAGS += -flto -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now
-release: clean $(TARGET) $(TARGET_TUI)
+release:
+	$(MAKE) clean
+	$(MAKE) CFLAGS="-O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-flto -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now" all
 	strip --strip-all $(TARGET) $(TARGET_TUI)
 	@mkdir -p bin
 	@cp -f $(TARGET) bin/$(TARGET)
@@ -61,7 +61,7 @@ MANDIR ?= $(PREFIX)/share/man/man1
 BASHCOMPDIR ?= $(PREFIX)/share/bash-completion/completions
 ZSHCOMPDIR ?= $(PREFIX)/share/zsh/site-functions
 
-install: release
+install: $(TARGET) $(TARGET_TUI)
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 	install -m 755 $(TARGET_TUI) $(DESTDIR)$(BINDIR)/$(TARGET_TUI)

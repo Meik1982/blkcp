@@ -1,6 +1,9 @@
 *.o
 *.d
-blkcp
-blkcp-tui
+/blkcp
+/blkcp-tui
 bin/
-
+packaging/arch/src/
+packaging/arch/pkg/
+packaging/arch/*.tar.gz
+packaging/arch/*.pkg.tar.*

@@ -11,6 +11,7 @@ _blkcp() {
         '(-q --quiet)'{-q,--quiet}'[Suppress progress and final transfer stats]' \
         '(-e --engine)'{-e,--engine}'[I/O backend engine]:engine:(auto uring async reflink splice sync)' \
         '(-f --force)'{-f,--force}'[Override Target Safety Guard]' \
+        '(-n --dry-run)'{-n,--dry-run}'[Simulate execution and print plan without writing]' \
         '--direct[Use Direct I/O (O_DIRECT)]' \
         '--nocache[Evict cache after copy]' \
         '--hash[Compute in-flight SHA-256 digest]' \

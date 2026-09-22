@@ -134,6 +134,7 @@ typedef struct dd_config
   bool o_nocache;                 /**< Discard output cache after every block write */
   bool i_nocache_eof;             /**< Discard entire input cache at EOF */
   bool o_nocache_eof;             /**< Discard entire output cache at completion */
+  bool dry_run;                   /**< Simulate execution, validate targets/guards, and print plan without writing */
 } dd_config_t;
 
 /**

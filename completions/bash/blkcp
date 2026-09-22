@@ -5,7 +5,7 @@ _blkcp() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="-i --input -o --output -b --block-size -c --count -l --limit -p --progress -q --quiet -e --engine -f --force --direct --nocache --hash --json --autotune --swab --sync --help --version"
+    opts="-i --input -o --output -b --block-size -c --count -l --limit -p --progress -q --quiet -e --engine -f --force -n --dry-run --direct --nocache --hash --json --autotune --swab --sync --help --version"
 
     case "${prev}" in
         -e|--engine)

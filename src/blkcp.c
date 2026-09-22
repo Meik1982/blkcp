@@ -75,6 +75,7 @@ Core Options:\n\
       --queue-depth=N      Async ringbuffer queue depth (2..1024 slots; default: auto)\n\
   -q, --quiet              Suppress all output except fatal error messages\n\
   -f, --force              Override Target Safety Guard (e.g. write to mounted disks)\n\
+  -n, --dry-run            Simulate transfer, inspect targets and show execution plan without writing\n\
       --hash, --sha256     Compute on-the-fly streaming SHA-256 checksum\n\
       --autotune           Enable dynamic in-flight throughput autotuning\n\
       --direct             Use direct I/O (O_DIRECT) bypassing kernel page cache\n\

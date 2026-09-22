@@ -120,6 +120,10 @@ blkcp -i /dev/nvme1n1 -o /mnt/backup/nvme.raw --nocache -p
 
 # 7. Machine-Readable NDJSON Output for Automation & Scripts:
 blkcp -i input.bin -o output.bin --json
+
+# 8. Safe Dry-Run Simulation (Inspect Plan & Target Guards without Writing):
+blkcp -i image.raw -o /dev/sdb -n
+blkcp -i image.raw -o /dev/sdb --dry-run --json
 ```
 
 ---
@@ -169,7 +173,7 @@ src/
 
 ## 🧪 Quality Assurance & Sanitizers
 
-The project is backed by **32 automated regression tests** covering bit-exactness, edge cases, Direct I/O tail handling, pipeline scaling, and safety intercepts.
+The project is backed by **33 automated regression tests** covering bit-exactness, edge cases, Direct I/O tail handling, pipeline scaling, simulation dry-runs, and safety intercepts.
 
 ```bash
 # Run release test suite:

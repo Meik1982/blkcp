@@ -50,6 +50,12 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   Registrierung der Ringpuffer über `io_uring_register_buffers()` im `io_uring`-Treiber mit `io_uring_prep_read_fixed()` und `io_uring_prep_write_fixed()`. Beseitigt Page-Pinning (`get_user_pages`) und Kernel-Mapping-Overheads vollständig mit automatischem Fallback.
 - [x] **In-Kernel Zero-Copy Splice Engine (`-e splice` / `splice(2)`):**
   Dedizierter Linux-Treiber `src/io_splice.c` für Pipes, FIFOs und Streams (`SPLICE_F_MOVE | SPLICE_F_MORE`). Beinhaltet Double-Splice über interne Kernel-Ringpuffer für File-to-File Transfers und nahtlosen Fallback bei FS-Inkompatibilitäten. In Regressionstest 31 verifiziert.
+- [x] **Gefahrloser Simulationsmodus (`--dry-run` / `-n`) & JSON-Ausführungsplan:**
+  Simuliert Datentransfers, validiert Quell- und Zielparameter, evaluiert den Target Safety Guard gegen `/proc/mounts` und `/proc/swaps` und emittiert einen detaillierten Ausführungsplan (oder NDJSON via `--json`), ohne Schreiboperationen auszuführen. In Regressionstest 33 verifiziert.
+- [x] **Fish-Shell Autovervollständigung (`completions/fish/blkcp.fish`):**
+  Vollständiges Autocompletion-Skript für die Fish-Shell inklusive aller modernen Schalter und `make install`/`uninstall`-Targets.
+- [x] **Vollständige Qualitätssicherung & Regressionstests:**
+  33/33 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`.
 
 ---
 

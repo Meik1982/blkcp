@@ -60,6 +60,7 @@ BINDIR ?= $(PREFIX)/bin
 MANDIR ?= $(PREFIX)/share/man/man1
 BASHCOMPDIR ?= $(PREFIX)/share/bash-completion/completions
 ZSHCOMPDIR ?= $(PREFIX)/share/zsh/site-functions
+FISHCOMPDIR ?= $(PREFIX)/share/fish/vendor_completions.d
 
 install: $(TARGET) $(TARGET_TUI)
 	install -d $(DESTDIR)$(BINDIR)
@@ -71,6 +72,8 @@ install: $(TARGET) $(TARGET_TUI)
 	install -m 644 completions/bash/blkcp $(DESTDIR)$(BASHCOMPDIR)/blkcp
 	install -d $(DESTDIR)$(ZSHCOMPDIR)
 	install -m 644 completions/zsh/_blkcp $(DESTDIR)$(ZSHCOMPDIR)/_blkcp
+	install -d $(DESTDIR)$(FISHCOMPDIR)
+	install -m 644 completions/fish/blkcp.fish $(DESTDIR)$(FISHCOMPDIR)/blkcp.fish
 	@echo "=== Installation erfolgreich in $(DESTDIR)$(BINDIR) abgeschlossen ==="
 
 uninstall:
@@ -79,6 +82,7 @@ uninstall:
 	rm -f $(DESTDIR)$(MANDIR)/blkcp.1
 	rm -f $(DESTDIR)$(BASHCOMPDIR)/blkcp
 	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_blkcp
+	rm -f $(DESTDIR)$(FISHCOMPDIR)/blkcp.fish
 	@echo "=== Deinstallation erfolgreich abgeschlossen ==="
 
 .PHONY: all release clean test benchmark man tui install uninstall

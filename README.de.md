@@ -110,6 +110,13 @@ Use '-f' or '--force' to override if intentional.
 ### 5. On-the-Fly Streaming SHA-256 Checksumme (`--hash` / `--sha256`)
 Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
 
+### 6. Gefahrloser Simulationsmodus (`--dry-run` / `-n`)
+Prüft Quell- und Zielparameter, evaluiert den Target Safety Guard und gibt den exakten Ausführungsplan aus (optional als maschinenlesbares NDJSON via `--json`), ohne Daten zu schreiben oder Zielmedien zu verändern. Perfekt für System-Skripte und KI-Agenten:
+```bash
+blkcp -i backup.iso -o /dev/sdb -n
+blkcp -i backup.iso -o /dev/sdb --dry-run --json
+```
+
 ---
 
 ## 5. Interaktive 2D-Spatial TUI (`blkcp-tui`)
@@ -176,7 +183,7 @@ make all
 # Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
 make release
 
-# Erweiterte Regressionstest-Suite (31 Tests):
+# Erweiterte Regressionstest-Suite (33 Tests):
 make test
 
 # Vergleichende Performance-Benchmarks (15 Szenarien):

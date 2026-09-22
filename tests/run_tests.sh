@@ -292,4 +292,57 @@ $BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_nocache_out.bin" -
 cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_nocache_out.bin"
 echo "Test 32 passed: Streaming Cache-Eviction (--nocache) bit-exactness"
 
-echo "=== All 32 modern blkcp tests passed successfully! ==="
+# Test 33: Dry-Run Simulation Mode (--dry-run / -n) & JSON Execution Plan
+# 33a: Standard dry-run ensures target file is never created or modified
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/dryrun_never_created.bin" --dry-run > "$TMP_DIR/dryrun.out"
+if [ -f "$TMP_DIR/dryrun_never_created.bin" ]; then
+    echo "ERROR: --dry-run created output file!"
+    exit 1
+fi
+grep -q "Dry-Run Execution Plan" "$TMP_DIR/dryrun.out"
+grep -q "No data was transferred or modified" "$TMP_DIR/dryrun.out"
+
+# 33b: Short option -n alias
+$BLKCP_BIN "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/dryrun_never_created_n.bin" -n > /dev/null
+if [ -f "$TMP_DIR/dryrun_never_created_n.bin" ]; then
+    echo "ERROR: -n created output file!"
+    exit 1
+fi
+
+# 33c: Machine-readable JSON execution plan
+DRY_JSON=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/dryrun_out.bin" -b 64K -e uring --dry-run --json)
+if [ -f "$TMP_DIR/dryrun_out.bin" ]; then
+    echo "ERROR: --dry-run --json created output file!"
+    exit 1
+fi
+python3 -c "
+import json
+data = json.loads('''$DRY_JSON''')
+assert data['event'] == 'dry_run'
+assert data['dry_run'] is True
+assert data['input']['size_bytes'] == 123456
+assert data['output']['exists'] is False
+assert data['plan']['engine'] == 'io_uring'
+assert data['plan']['blocksize'] == 65536
+"
+
+# 33d: Dry-run safety guard reporting on mounted device
+ROOT_DEV=$(df / 2>/dev/null | tail -1 | awk '{print $1}')
+if [ -n "$ROOT_DEV" ] && [ -b "$ROOT_DEV" ]; then
+    DRY_GUARD_JSON=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$ROOT_DEV" --dry-run --json)
+    python3 -c "
+import json
+data = json.loads('''$DRY_GUARD_JSON''')
+assert data['output']['type'] == 'block_device'
+assert data['output']['safety_guard'] == 'blocked'
+"
+    DRY_FORCE_JSON=$($BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$ROOT_DEV" --dry-run -f --json)
+    python3 -c "
+import json
+data = json.loads('''$DRY_FORCE_JSON''')
+assert data['output']['safety_guard'] == 'overridden'
+"
+fi
+echo "Test 33 passed: Dry-Run Simulation Mode (--dry-run / -n) & JSON Execution Plan"
+
+echo "=== All 33 modern blkcp tests passed successfully! ==="

@@ -160,73 +160,73 @@ is_partition_of_device (char const *dev_name, char const *disk_name)
     }
 }
 
-/* Verifies that the target block device is not a mounted system partition unless forced */
-static void
-check_target_safety (dd_context_t *ctx)
-{
-  if (!ctx->cfg.output_file)
-    return;
+typedef enum target_safety_status {
+  TARGET_SAFETY_OK = 0,
+  TARGET_SAFETY_MOUNTED_SYSTEM,
+  TARGET_SAFETY_ACTIVE_SWAP
+} target_safety_status_t;
 
-  if ((ctx->cfg.output_flags & O_FORCE) || (ctx->cfg.conversions_mask & C_FORCE))
-    return;
+static target_safety_status_t
+evaluate_target_safety (char const *output_file, char *detail, size_t detail_size)
+{
+  if (!output_file)
+    return TARGET_SAFETY_OK;
 
   struct stat target_st;
-  if (stat (ctx->cfg.output_file, &target_st) != 0)
-    return;
+  if (stat (output_file, &target_st) != 0)
+    return TARGET_SAFETY_OK;
 
   if (!S_ISBLK (target_st.st_mode))
-    return;
+    return TARGET_SAFETY_OK;
 
   FILE *fp = fopen ("/proc/mounts", "r");
-  if (!fp)
-    return;
-
-  char line[1024];
-  char devpath[512];
-  char mountpoint[512];
-
-  while (fgets (line, sizeof line, fp))
+  if (fp)
     {
-      if (sscanf (line, "%511s %511s", devpath, mountpoint) != 2)
-        continue;
+      char line[1024];
+      char devpath[512];
+      char mountpoint[512];
 
-      if (strcmp (mountpoint, "/") == 0
-          || strcmp (mountpoint, "/boot") == 0
-          || strcmp (mountpoint, "/boot/efi") == 0
-          || strcmp (mountpoint, "/home") == 0)
+      while (fgets (line, sizeof line, fp))
         {
-          struct stat m_st;
-          if (stat (devpath, &m_st) == 0 && S_ISBLK (m_st.st_mode))
-            {
-              bool match = false;
-              if (m_st.st_rdev == target_st.st_rdev)
-                match = true;
-              else if (major (m_st.st_rdev) == major (target_st.st_rdev))
-                {
-                  char const *tgt_base = strrchr (ctx->cfg.output_file, '/');
-                  char const *dev_base = strrchr (devpath, '/');
-                  if (tgt_base && dev_base)
-                    {
-                      tgt_base++;
-                      dev_base++;
-                      if (is_partition_of_device (dev_base, tgt_base))
-                        match = true;
-                    }
-                }
+          if (sscanf (line, "%511s %511s", devpath, mountpoint) != 2)
+            continue;
 
-              if (match)
+          if (strcmp (mountpoint, "/") == 0
+              || strcmp (mountpoint, "/boot") == 0
+              || strcmp (mountpoint, "/boot/efi") == 0
+              || strcmp (mountpoint, "/home") == 0)
+            {
+              struct stat m_st;
+              if (stat (devpath, &m_st) == 0 && S_ISBLK (m_st.st_mode))
                 {
-                  fclose (fp);
-                  error (EXIT_FAILURE, 0,
-                         _("SAFETY GUARD: refusing to overwrite '%s' which contains mounted system path '%s'.\n"
-                           "Use '-f' or '--force' to override if intentional."),
-                         quoteaf (ctx->cfg.output_file), quoteaf (mountpoint));
+                  bool match = false;
+                  if (m_st.st_rdev == target_st.st_rdev)
+                    match = true;
+                  else if (major (m_st.st_rdev) == major (target_st.st_rdev))
+                    {
+                      char const *tgt_base = strrchr (output_file, '/');
+                      char const *dev_base = strrchr (devpath, '/');
+                      if (tgt_base && dev_base)
+                        {
+                          tgt_base++;
+                          dev_base++;
+                          if (is_partition_of_device (dev_base, tgt_base))
+                            match = true;
+                        }
+                    }
+
+                  if (match)
+                    {
+                      fclose (fp);
+                      if (detail && detail_size > 0)
+                        snprintf (detail, detail_size, "%s", mountpoint);
+                      return TARGET_SAFETY_MOUNTED_SYSTEM;
+                    }
                 }
             }
         }
+      fclose (fp);
     }
-
-  fclose (fp);
 
   /* Check /proc/swaps to protect active system swap partitions */
   FILE *sfp = fopen ("/proc/swaps", "r");
@@ -250,7 +250,7 @@ check_target_safety (dd_context_t *ctx)
                     match = true;
                   else if (major (sw_st.st_rdev) == major (target_st.st_rdev))
                     {
-                      char const *tgt_base = strrchr (ctx->cfg.output_file, '/');
+                      char const *tgt_base = strrchr (output_file, '/');
                       char const *dev_base = strrchr (swap_dev, '/');
                       if (tgt_base && dev_base)
                         {
@@ -264,15 +264,44 @@ check_target_safety (dd_context_t *ctx)
                   if (match)
                     {
                       fclose (sfp);
-                      error (EXIT_FAILURE, 0,
-                             _("SAFETY GUARD: refusing to overwrite '%s' which is an active system swap device (%s).\n"
-                               "Use '-f' or '--force' to override if intentional."),
-                             quoteaf (ctx->cfg.output_file), quoteaf (swap_dev));
+                      if (detail && detail_size > 0)
+                        snprintf (detail, detail_size, "%s", swap_dev);
+                      return TARGET_SAFETY_ACTIVE_SWAP;
                     }
                 }
             }
         }
       fclose (sfp);
+    }
+
+  return TARGET_SAFETY_OK;
+}
+
+/* Verifies that the target block device is not a mounted system partition unless forced */
+static void
+check_target_safety (dd_context_t *ctx)
+{
+  if (!ctx->cfg.output_file)
+    return;
+
+  if ((ctx->cfg.output_flags & O_FORCE) || (ctx->cfg.conversions_mask & C_FORCE))
+    return;
+
+  char detail[512] = {0};
+  target_safety_status_t status = evaluate_target_safety (ctx->cfg.output_file, detail, sizeof detail);
+  if (status == TARGET_SAFETY_MOUNTED_SYSTEM)
+    {
+      error (EXIT_FAILURE, 0,
+             _("SAFETY GUARD: refusing to overwrite '%s' which contains mounted system path '%s'.\n"
+               "Use '-f' or '--force' to override if intentional."),
+             quoteaf (ctx->cfg.output_file), quoteaf (detail));
+    }
+  else if (status == TARGET_SAFETY_ACTIVE_SWAP)
+    {
+      error (EXIT_FAILURE, 0,
+             _("SAFETY GUARD: refusing to overwrite '%s' which is an active system swap device (%s).\n"
+               "Use '-f' or '--force' to override if intentional."),
+             quoteaf (ctx->cfg.output_file), quoteaf (detail));
     }
 }
 #endif
@@ -991,10 +1020,303 @@ dd_cleanup (void)
     dd_engine_cleanup (active_ctx);
 }
 
+static int
+dd_execute_dry_run (dd_context_t *ctx)
+{
+  /* 1. Inspect input stream */
+  char const *in_path = ctx->cfg.input_file ? ctx->cfg.input_file : "<standard input>";
+  char const *in_type = "stream";
+  intmax_t in_size = -1;
+  bool in_exists = true;
+
+  if (ctx->cfg.input_file)
+    {
+      struct stat st_in;
+      if (stat (ctx->cfg.input_file, &st_in) == 0)
+        {
+          if (S_ISREG (st_in.st_mode))
+            {
+              in_type = "regular_file";
+              in_size = st_in.st_size;
+            }
+          else if (S_ISBLK (st_in.st_mode))
+            {
+              in_type = "block_device";
+#if defined __linux__ && defined BLKGETSIZE64
+              int fd = open (ctx->cfg.input_file, O_RDONLY | O_CLOEXEC);
+              if (fd >= 0)
+                {
+                  uint64_t bytes = 0;
+                  if (ioctl (fd, BLKGETSIZE64, &bytes) == 0)
+                    in_size = (intmax_t) bytes;
+                  close (fd);
+                }
+#endif
+            }
+          else if (S_ISCHR (st_in.st_mode))
+            in_type = "character_device";
+          else if (S_ISFIFO (st_in.st_mode))
+            in_type = "fifo_pipe";
+          else if (S_ISDIR (st_in.st_mode))
+            in_type = "directory";
+          else
+            in_type = "special_file";
+        }
+      else
+        {
+          in_exists = false;
+          in_type = "not_found";
+        }
+    }
+
+  /* 2. Inspect output stream */
+  char const *out_path = ctx->cfg.output_file ? ctx->cfg.output_file : "<standard output>";
+  char const *out_type = "stream";
+  intmax_t out_size = -1;
+  bool out_exists = false;
+
+  if (ctx->cfg.output_file)
+    {
+      struct stat st_out;
+      if (stat (ctx->cfg.output_file, &st_out) == 0)
+        {
+          out_exists = true;
+          if (S_ISREG (st_out.st_mode))
+            {
+              out_type = "regular_file";
+              out_size = st_out.st_size;
+            }
+          else if (S_ISBLK (st_out.st_mode))
+            {
+              out_type = "block_device";
+#if defined __linux__ && defined BLKGETSIZE64
+              int fd = open (ctx->cfg.output_file, O_RDONLY | O_CLOEXEC);
+              if (fd >= 0)
+                {
+                  uint64_t bytes = 0;
+                  if (ioctl (fd, BLKGETSIZE64, &bytes) == 0)
+                    out_size = (intmax_t) bytes;
+                  close (fd);
+                }
+#endif
+            }
+          else if (S_ISCHR (st_out.st_mode))
+            out_type = "character_device";
+          else if (S_ISFIFO (st_out.st_mode))
+            out_type = "fifo_pipe";
+          else if (S_ISDIR (st_out.st_mode))
+            out_type = "directory";
+          else
+            out_type = "special_file";
+        }
+      else
+        {
+          out_exists = false;
+          out_type = "new_file";
+        }
+    }
+
+  /* 3. Safety Guard Evaluation */
+  char guard_detail[512] = {0};
+  char const *guard_status = "ok";
+  char const *guard_msg = "OK (no target restrictions violated)";
+  bool forced = (ctx->cfg.output_flags & O_FORCE) || (ctx->cfg.conversions_mask & C_FORCE);
+
+#if defined __linux__
+  target_safety_status_t safety = evaluate_target_safety (ctx->cfg.output_file, guard_detail, sizeof guard_detail);
+  if (safety == TARGET_SAFETY_MOUNTED_SYSTEM)
+    {
+      if (forced)
+        {
+          guard_status = "overridden";
+          guard_msg = "OVERRIDDEN via -f/--force (target contains mounted system partition)";
+        }
+      else
+        {
+          guard_status = "blocked";
+          guard_msg = "BLOCKED: would refuse to write (target contains mounted system partition; requires -f)";
+        }
+    }
+  else if (safety == TARGET_SAFETY_ACTIVE_SWAP)
+    {
+      if (forced)
+        {
+          guard_status = "overridden";
+          guard_msg = "OVERRIDDEN via -f/--force (target is active system swap device)";
+        }
+      else
+        {
+          guard_status = "blocked";
+          guard_msg = "BLOCKED: would refuse to write (target is active system swap device; requires -f)";
+        }
+    }
+#endif
+
+  /* 4. Determine Engine */
+  char const *engine_name = "sync";
+  char const *engine_desc = "Classic synchronous block I/O";
+
+  if (ctx->cfg.engine == ENGINE_URING || (ctx->cfg.conversions_mask & C_URING))
+    {
+      engine_name = "io_uring";
+      engine_desc = "Linux io_uring asynchronous execution";
+    }
+  else if (ctx->cfg.engine == ENGINE_REFLINK || (ctx->cfg.conversions_mask & C_REFLINK))
+    {
+      engine_name = "reflink";
+      engine_desc = "Linux Kernel zero-copy copy_file_range";
+    }
+  else if (ctx->cfg.engine == ENGINE_SPLICE || (ctx->cfg.conversions_mask & C_SPLICE))
+    {
+      engine_name = "splice";
+      engine_desc = "Linux Kernel zero-copy pipe splicing";
+    }
+  else if (ctx->cfg.engine == ENGINE_ASYNC || (ctx->cfg.conversions_mask & C_ASYNC) || (ctx->cfg.output_flags & O_ASYNC_PIPELINE))
+    {
+      engine_name = "async";
+      engine_desc = "Multi-threaded ringbuffer pipeline";
+    }
+  else if (ctx->cfg.engine == ENGINE_SYNC)
+    {
+      engine_name = "sync";
+      engine_desc = "Classic synchronous block I/O";
+    }
+  else /* ENGINE_AUTO */
+    {
+#if defined __linux__
+      const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_SPARSE | C_AUTOTUNE;
+      bool can_reflink = !(ctx->cfg.conversions_mask & incompatible)
+                         && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
+                         && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
+                         && !(ctx->cfg.output_flags & (O_DIRECT | O_NOCACHE))
+                         && strcmp (in_type, "regular_file") == 0
+                         && (strcmp (out_type, "regular_file") == 0 || strcmp (out_type, "new_file") == 0);
+
+      bool is_in_blk = (strcmp (in_type, "block_device") == 0);
+      bool is_out_blk = (strcmp (out_type, "block_device") == 0);
+      bool is_direct = (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT);
+      bool can_uring = !(ctx->cfg.conversions_mask & (C_SWAB | C_AUTOTUNE))
+                       && (is_in_blk || is_out_blk || is_direct);
+
+      bool in_pipe = (strcmp (in_type, "fifo_pipe") == 0 || !ctx->cfg.input_file);
+      bool out_pipe = (strcmp (out_type, "fifo_pipe") == 0 || !ctx->cfg.output_file);
+      bool can_splice = !(ctx->cfg.conversions_mask & incompatible)
+                        && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
+                        && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
+                        && !(ctx->cfg.output_flags & (O_DIRECT | O_NOCACHE))
+                        && (in_pipe || out_pipe);
+
+      if (can_reflink)
+        {
+          engine_name = "reflink";
+          engine_desc = "Linux Kernel zero-copy copy_file_range (auto-detected)";
+        }
+      else if (can_uring)
+        {
+          engine_name = "io_uring";
+          engine_desc = "Linux io_uring asynchronous execution (auto-detected)";
+        }
+      else if (can_splice)
+        {
+          engine_name = "splice";
+          engine_desc = "Linux Kernel zero-copy pipe splicing (auto-detected)";
+        }
+      else
+        {
+          engine_name = "sync";
+          engine_desc = "Classic synchronous block I/O (default)";
+        }
+#else
+      engine_name = "sync";
+      engine_desc = "Classic synchronous block I/O (default)";
+#endif
+    }
+
+  /* 5. Transfer block size */
+  idx_t effective_bs = ctx->cfg.blocksize > 0 ? ctx->cfg.blocksize : 512;
+  bool autotune = (ctx->cfg.conversions_mask & C_AUTOTUNE) != 0;
+
+  /* 6. Formatting */
+  if (ctx->cfg.json_output || ctx->cfg.status_level == STATUS_JSON)
+    {
+      printf ("{\"event\":\"dry_run\",\"dry_run\":true,"
+              "\"input\":{\"path\":\"%s\",\"type\":\"%s\",\"exists\":%s,\"size_bytes\":%jd},"
+              "\"output\":{\"path\":\"%s\",\"type\":\"%s\",\"exists\":%s,\"size_bytes\":%jd,"
+              "\"safety_guard\":\"%s\",\"safety_guard_detail\":\"%s\"},"
+              "\"plan\":{\"engine\":\"%s\",\"blocksize\":%zu,\"autotune\":%s,"
+              "\"direct_io\":%s,\"nocache\":%s,\"sha256\":%s,"
+              "\"limit_bytes\":%jd,\"skip_bytes\":%zu,\"seek_bytes\":%zu}}\n",
+              in_path, in_type, in_exists ? "true" : "false", in_size,
+              out_path, out_type, out_exists ? "true" : "false", out_size,
+              guard_status, guard_detail,
+              engine_name, (size_t) effective_bs, autotune ? "true" : "false",
+              (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT) ? "true" : "false",
+              ctx->cfg.i_nocache || ctx->cfg.o_nocache ? "true" : "false",
+              ctx->cfg.conversions_mask & C_SHA256 ? "true" : "false",
+              (intmax_t) ctx->cfg.bytes_to_copy,
+              (size_t) (ctx->cfg.skip_records * effective_bs + ctx->cfg.skip_bytes),
+              (size_t) (ctx->cfg.seek_records * effective_bs + ctx->cfg.seek_bytes));
+    }
+  else
+    {
+      printf (_("=== blkcp Dry-Run Execution Plan ===\n"));
+      if (in_size >= 0)
+        printf (_("Input:        %s (%s, %jd bytes)\n"), in_path, in_type, in_size);
+      else
+        printf (_("Input:        %s (%s)\n"), in_path, in_type);
+
+      if (out_size >= 0)
+        printf (_("Output:       %s (%s, %jd bytes)\n"), out_path, out_type, out_size);
+      else
+        printf (_("Output:       %s (%s)\n"), out_path, out_type);
+
+      if (guard_detail[0] != '\0')
+        printf (_("Safety Guard: %s [%s]\n"), guard_msg, guard_detail);
+      else
+        printf (_("Safety Guard: %s\n"), guard_msg);
+
+      printf (_("Engine:       %s (%s)\n"), engine_name, engine_desc);
+
+      if (autotune)
+        printf (_("Block Size:   dynamic (autotune active)\n"));
+      else
+        printf (_("Block Size:   %zu bytes\n"), (size_t) effective_bs);
+
+      printf (_("Direct I/O:   %s\n"),
+              (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT) ? _("enabled (O_DIRECT)") : _("disabled"));
+      printf (_("Cache Policy: %s\n"),
+              ctx->cfg.i_nocache || ctx->cfg.o_nocache ? _("nocache (chunked eviction)") : _("kernel page cache"));
+      printf (_("Checksum:     %s\n"),
+              ctx->cfg.conversions_mask & C_SHA256 ? _("SHA-256 (in-flight)") : _("disabled"));
+
+      if (ctx->cfg.bytes_to_copy >= 0)
+        printf (_("Byte Limit:   %jd bytes\n"), (intmax_t) ctx->cfg.bytes_to_copy);
+      else
+        printf (_("Byte Limit:   unbounded\n"));
+
+      if (ctx->cfg.skip_records > 0 || ctx->cfg.skip_bytes > 0)
+        printf (_("Skip Offset:  %zu bytes\n"), (size_t) (ctx->cfg.skip_records * effective_bs + ctx->cfg.skip_bytes));
+      if (ctx->cfg.seek_records > 0 || ctx->cfg.seek_bytes > 0)
+        printf (_("Seek Offset:  %zu bytes\n"), (size_t) (ctx->cfg.seek_records * effective_bs + ctx->cfg.seek_bytes));
+
+      printf (_("Note: Dry-run simulation mode (-n / --dry-run) active. No data was transferred or modified.\n"));
+    }
+
+  return EXIT_SUCCESS;
+}
+
 int
 dd_execute (dd_context_t *ctx)
 {
   active_ctx = ctx;
+
+  if (ctx->cfg.dry_run)
+    {
+      int status = dd_execute_dry_run (ctx);
+      active_ctx = NULL;
+      return status;
+    }
+
   setup_input_stream (ctx);
   setup_output_stream (ctx);
 

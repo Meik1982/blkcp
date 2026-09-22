@@ -58,6 +58,9 @@ Suppress all output except fatal error messages.
 \fB\-f\fR, \fB\-\-force\fR
 Override the Target Safety Guard when attempting to write to devices hosting mounted root/boot partitions.
 .TP
+\fB\-n\fR, \fB\-\-dry\-run\fR
+Simulate execution, inspect source/target parameters, evaluate the Target Safety Guard, and print the detailed execution plan (or JSON when paired with \fB\-\-json\fR) without transferring or modifying any data.
+.TP
 \fB\-\-hash\fR, \fB\-\-sha256\fR
 Compute on-the-fly streaming SHA-256 cryptographic digest without requiring an extra I/O pass.
 .TP

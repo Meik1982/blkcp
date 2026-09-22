@@ -65,6 +65,7 @@ static struct option const modern_long_options[] =
   {"async-queue",  required_argument, NULL, OPT_QUEUE_DEPTH},
   {"quiet",        no_argument,       NULL, 'q'},
   {"force",        no_argument,       NULL, 'f'},
+  {"dry-run",      no_argument,       NULL, 'n'},
   {"autotune",     no_argument,       NULL, OPT_AUTOTUNE},
   {"hash",         no_argument,       NULL, OPT_HASH},
   {"sha256",       no_argument,       NULL, OPT_HASH},
@@ -140,7 +141,7 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
 
   optind = 1;
   int c;
-  while ((c = getopt_long (argc, (char **) argv, "i:o:b:e:l:s:c:pqfhv", modern_long_options, NULL)) != -1)
+  while ((c = getopt_long (argc, (char **) argv, "i:o:b:e:l:s:c:pqfnhv", modern_long_options, NULL)) != -1)
     {
       switch (c)
         {
@@ -242,6 +243,9 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
           break;
         case 'f':
           cfg->output_flags |= O_FORCE;
+          break;
+        case 'n':
+          cfg->dry_run = true;
           break;
         case OPT_AUTOTUNE:
           cfg->conversions_mask |= C_AUTOTUNE;

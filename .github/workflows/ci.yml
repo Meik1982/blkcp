@@ -42,7 +42,7 @@ jobs:
       - name: Compile blkcp and blkcp-tui
         run: ${{ matrix.build_cmd }}
 
-      - name: Run test suite (32 tests)
+      - name: Run test suite (33 tests)
         run: ./tests/run_tests.sh
 
       - name: Verify CLI options & version output

@@ -41,6 +41,7 @@ reflink CoW, splice, sync), Target Safety Guard, and an interactive 2D spatial T
 %{_mandir}/man1/blkcp.1*
 %{_datadir}/bash-completion/completions/blkcp
 %{_datadir}/zsh/site-functions/_blkcp
+%{_datadir}/fish/vendor_completions.d/blkcp.fish
 
 %changelog
 * Mon Sep 21 2026 Meik <meik@github.com> - 1.0.0-1

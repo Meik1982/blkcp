@@ -79,8 +79,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v1.0.0 >/dev/null 2>&1; then
-            gh release upload v1.0.0 dist/*.deb --clobber
+          VERSION=$(grep -m1 '^Version:' packaging/rpm/blkcp.spec | awk '{print $2}')
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.deb --clobber
           fi
 
   package-rpm:
@@ -100,8 +102,9 @@ jobs:
 
       - name: Build RPM Package
         run: |
+          VERSION=$(grep -m1 '^Version:' packaging/rpm/blkcp.spec | awk '{print $2}')
           mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          tar --transform 's,^\.,blkcp-1.0.0,' --exclude='.git' --exclude='packaging/arch/src' --exclude='packaging/arch/pkg' -czf ~/rpmbuild/SOURCES/v1.0.0.tar.gz .
+          tar --transform "s,^\.,blkcp-${VERSION}," --exclude='.git' --exclude='packaging/arch/src' --exclude='packaging/arch/pkg' -czf ~/rpmbuild/SOURCES/v${VERSION}.tar.gz .
           rpmbuild -ba packaging/rpm/blkcp.spec
           mkdir -p dist
           cp ~/rpmbuild/RPMS/*/*.rpm dist/
@@ -116,6 +119,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if gh release view v1.0.0 >/dev/null 2>&1; then
-            gh release upload v1.0.0 dist/*.rpm --clobber
+          VERSION=$(grep -m1 '^Version:' packaging/rpm/blkcp.spec | awk '{print $2}')
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.rpm --clobber
           fi

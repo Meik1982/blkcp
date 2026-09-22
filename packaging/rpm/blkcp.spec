@@ -1,7 +1,7 @@
 %define debug_package %{nil}
 
 Name:           blkcp
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Next-Gen High-Performance Block Copy Tool for Linux
 License:        GPL-3.0-or-later
@@ -44,5 +44,10 @@ reflink CoW, splice, sync), Target Safety Guard, and an interactive 2D spatial T
 %{_datadir}/fish/vendor_completions.d/blkcp.fish
 
 %changelog
+* Tue Sep 22 2026 Meik <meik@github.com> - 1.0.1-1
+- Add --dry-run / -n simulation mode with JSON output
+- Add Fish shell completion
+- Bugfixes and packaging hardening
+
 * Mon Sep 21 2026 Meik <meik@github.com> - 1.0.0-1
 - Initial public release v1.0.0

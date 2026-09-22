@@ -304,7 +304,7 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
           usage (EXIT_SUCCESS);
           break;
         case 'v':
-          version_etc (stdout, "blkcp", PACKAGE_NAME, Version, "Meik", (char *) NULL);
+          version_etc (stdout, "blkcp", "blkcp", Version, "Meik", (char *) NULL);
           exit (EXIT_SUCCESS);
           break;
         default:

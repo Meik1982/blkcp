@@ -1,6 +1,6 @@
 # Maintainer: Meik <https://github.com/Meik1982>
 pkgname=blkcp
-pkgver=1.0.0
+pkgver=1.0.1
 pkgrel=1
 pkgdesc="Next-Gen High-Performance Block Copy Tool for Linux (io_uring, Reflink CoW, Target Safety Guard & TUI)"
 arch=('x86_64')

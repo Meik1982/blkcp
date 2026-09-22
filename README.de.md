@@ -144,9 +144,9 @@ makepkg -si
 
 ### Ubuntu / Debian
 **Empfohlen (Fertiges `.deb`-Paket via `apt`):**
-Lade `blkcp_1.0.0-1_amd64.deb` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+Lade `blkcp_1.0.1-1_amd64.deb` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
 ```bash
-sudo apt install ./blkcp_1.0.0-1_amd64.deb
+sudo apt install ./blkcp_1.0.1-1_amd64.deb
 ```
 
 *(Oder selbst ein natives `.deb`-Paket aus dem Quellcode bauen):*
@@ -155,14 +155,14 @@ git clone https://github.com/Meik1982/blkcp.git
 cd blkcp
 sudo apt-get update && sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
 dpkg-buildpackage -us -uc -b
-sudo apt install ../blkcp_1.0.0-1_amd64.deb
+sudo apt install ../blkcp_1.0.1-1_amd64.deb
 ```
 
 ### Fedora / RHEL / openSUSE
 **Empfohlen (Fertiges `.rpm`-Paket via `dnf`):**
-Lade `blkcp-1.0.0-1.x86_64.rpm` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+Lade `blkcp-1.0.1-1.x86_64.rpm` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
 ```bash
-sudo dnf install ./blkcp-1.0.0-1.x86_64.rpm
+sudo dnf install ./blkcp-1.0.1-1.x86_64.rpm
 ```
 
 ### Manuelle Installation aus dem Quellcode (alle Distributionen):

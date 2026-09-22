@@ -9,7 +9,7 @@ license=('GPL-3.0-or-later')
 depends=('glibc' 'liburing' 'openssl' 'ncurses')
 makedepends=('git' 'gcc' 'make')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Meik1982/blkcp/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('8baafae834f0c7629dec98547c5f7de72a0ee300e9b7eb1bc19799e79edc3d5b')
+sha256sums=('7d6dc3b340bcdd1855c517d907e32e9ca17449917f2e0972ec9e73a6f0ff8d5c')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"

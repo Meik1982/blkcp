@@ -1,6 +1,6 @@
 pkgbase = blkcp
 	pkgdesc = Next-Gen High-Performance Block Copy Tool for Linux (io_uring, Reflink CoW, Target Safety Guard & TUI)
-	pkgver = 1.0.0
+	pkgver = 1.0.1
 	pkgrel = 1
 	url = https://github.com/Meik1982/blkcp
 	arch = x86_64
@@ -12,7 +12,7 @@ pkgbase = blkcp
 	depends = liburing
 	depends = openssl
 	depends = ncurses
-	source = blkcp-1.0.0.tar.gz::https://github.com/Meik1982/blkcp/archive/refs/tags/v1.0.0.tar.gz
-	sha256sums = 8baafae834f0c7629dec98547c5f7de72a0ee300e9b7eb1bc19799e79edc3d5b
+	source = blkcp-1.0.1.tar.gz::https://github.com/Meik1982/blkcp/archive/refs/tags/v1.0.1.tar.gz
+	sha256sums = 7d6dc3b340bcdd1855c517d907e32e9ca17449917f2e0972ec9e73a6f0ff8d5c
 
 pkgname = blkcp

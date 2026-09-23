@@ -503,8 +503,13 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
     {
       off_t offset = lseek (fd, size, SEEK_CUR);
       if (0 <= offset)
-        return size;
+        {
+          ctx->final_op_was_seek = true;
+          return size;
+        }
     }
+
+  ctx->final_op_was_seek = false;
 
   while (total_written < size)
     {
@@ -835,6 +840,29 @@ dd_copy (dd_context_t *ctx)
   /* Flush pending buffers and release driver resources */
   driver->flush (ctx, driver_state);
   driver->cleanup (ctx, driver_state);
+
+  /* Finalize sparse file length if the trailing block was skipped via lseek */
+  if (ctx->final_op_was_seek)
+    {
+      struct stat st;
+      if (fstat (STDOUT_FILENO, &st) == 0 && S_ISREG (st.st_mode))
+        {
+          off_t cur_pos = lseek (STDOUT_FILENO, 0, SEEK_CUR);
+          if (cur_pos > 0)
+            {
+              if (ftruncate (STDOUT_FILENO, cur_pos) != 0)
+                {
+                  if (lseek (STDOUT_FILENO, -1, SEEK_CUR) >= 0)
+                    {
+                      char zero = 0;
+                      if (write (STDOUT_FILENO, &zero, 1) < 0)
+                        { /* ignore write error */ }
+                    }
+                }
+            }
+        }
+      ctx->final_op_was_seek = false;
+    }
 
   /* Finalize SHA-256 digest if active */
   if (ctx->cfg.conversions_mask & C_SHA256)

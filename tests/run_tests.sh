@@ -345,4 +345,72 @@ assert data['output']['safety_guard'] == 'overridden'
 fi
 echo "Test 33 passed: Dry-Run Simulation Mode (--dry-run / -n) & JSON Execution Plan"
 
-echo "=== All 33 modern blkcp tests passed successfully! ==="
+# Test 34: Sparse Hole-Punching (--sparse)
+head -c 4194304 /dev/zero > "$TMP_DIR/sparse_src.bin"
+head -c 1048576 /dev/urandom >> "$TMP_DIR/sparse_src.bin"
+head -c 4194304 /dev/zero >> "$TMP_DIR/sparse_src.bin"
+$BLKCP_BIN -i "$TMP_DIR/sparse_src.bin" -o "$TMP_DIR/sparse_dst.bin" -b 1M --sparse -q
+cmp "$TMP_DIR/sparse_src.bin" "$TMP_DIR/sparse_dst.bin"
+SRC_BLOCKS=$(stat -c %b "$TMP_DIR/sparse_src.bin")
+DST_BLOCKS=$(stat -c %b "$TMP_DIR/sparse_dst.bin")
+[[ "$DST_BLOCKS" -lt "$SRC_BLOCKS" ]]
+echo "Test 34 passed: Sparse Hole-Punching (--sparse creates actual filesystem holes)"
+
+# Test 35: Partial write without file truncation (--notrunc)
+head -c 1048576 /dev/zero > "$TMP_DIR/base_notrunc.bin"
+printf "HELLO_NOTRUNC_WORLD" | $BLKCP_BIN -o "$TMP_DIR/base_notrunc.bin" -b 512 --notrunc -c 1 -q
+[[ $(stat -c %s "$TMP_DIR/base_notrunc.bin") -eq 1048576 ]]
+[[ "$(< "$TMP_DIR/base_notrunc.bin" head -c 19)" == "HELLO_NOTRUNC_WORLD" ]]
+# Check tail is still intact nulls
+tail -c +513 "$TMP_DIR/base_notrunc.bin" > "$TMP_DIR/notrunc_tail.bin"
+cmp -n 1024 "$TMP_DIR/notrunc_tail.bin" /dev/zero
+echo "Test 35 passed: Partial write without file truncation (--notrunc preserves trailing data)"
+
+# Test 36: Real-time signal handling and in-flight telemetry (SIGUSR1)
+$BLKCP_BIN -i /dev/zero -o "$TMP_DIR/sig_out.bin" -b 64K -l 67108864 -p 2>"$TMP_DIR/sig_stderr.txt" &
+SIG_PID=$!
+sleep 0.05
+kill -USR1 "$SIG_PID" 2>/dev/null || true
+wait "$SIG_PID"
+[[ $(stat -c %s "$TMP_DIR/sig_out.bin") -eq 67108864 ]]
+grep -q -E "copied|records" "$TMP_DIR/sig_stderr.txt"
+echo "Test 36 passed: Real-time signal handling and in-flight telemetry (SIGUSR1 without disruption)"
+
+# Test 37: Negative Test Suite / Error paths and non-zero exit codes
+# 37a: Non-existent input file
+if $BLKCP_BIN -i "$TMP_DIR/non_existent_file_12345.bin" -o "$TMP_DIR/err_out.bin" -q 2>/dev/null; then
+  echo "Error: Expected failure on missing input file" >&2
+  exit 1
+fi
+
+# 37b: Invalid execution engine
+if $BLKCP_BIN -i "$TMP_DIR/in2" -o "$TMP_DIR/err_out.bin" -e invalid_engine -q 2>/dev/null; then
+  echo "Error: Expected failure on invalid engine" >&2
+  exit 1
+fi
+
+# 37c: Invalid block size (0 or invalid string)
+if $BLKCP_BIN -i "$TMP_DIR/in2" -o "$TMP_DIR/err_out.bin" -b 0 -q 2>/dev/null; then
+  echo "Error: Expected failure on zero blocksize" >&2
+  exit 1
+fi
+if $BLKCP_BIN -i "$TMP_DIR/in2" -o "$TMP_DIR/err_out.bin" -b notanumber -q 2>/dev/null; then
+  echo "Error: Expected failure on malformed blocksize" >&2
+  exit 1
+fi
+
+# 37d: Invalid seek/skip offset
+if $BLKCP_BIN -i "$TMP_DIR/in2" -o "$TMP_DIR/err_out.bin" --skip=-5 -q 2>/dev/null; then
+  echo "Error: Expected failure on negative skip" >&2
+  exit 1
+fi
+echo "Test 37 passed: Negative Test Suite / Error paths and non-zero exit codes"
+
+# Test 38: Synchronization flags (--fsync and --fdatasync)
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_fsync_out.bin" --fsync -q
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_fsync_out.bin"
+$BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_fdatasync_out.bin" --fdatasync -q
+cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_fdatasync_out.bin"
+echo "Test 38 passed: Synchronization flags (--fsync and --fdatasync)"
+
+echo "=== All 38 modern blkcp tests passed successfully! ==="

@@ -54,8 +54,10 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   Simuliert Datentransfers, validiert Quell- und Zielparameter, evaluiert den Target Safety Guard gegen `/proc/mounts` und `/proc/swaps` und emittiert einen detaillierten Ausführungsplan (oder NDJSON via `--json`), ohne Schreiboperationen auszuführen. In Regressionstest 33 verifiziert.
 - [x] **Fish-Shell Autovervollständigung (`completions/fish/blkcp.fish`):**
   Vollständiges Autocompletion-Skript für die Fish-Shell inklusive aller modernen Schalter und `make install`/`uninstall`-Targets.
+- [x] **Sparse Hole-Punching & Trailing-Seek Härtung (`--sparse`):**
+  Lückenlose Sparse-Dateigenerierung via `lseek(SEEK_CUR)` und atomare Finalisierung über `ftruncate` am Dateiende in `src/io_engine.c`, falls die Datei mit einem Null-Block abschließt. Verifiziert mit tatsächlicher Disk-Block-Reduktion via `stat -c %b`.
 - [x] **Vollständige Qualitätssicherung & Regressionstests:**
-  33/33 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`.
+  38/38 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`) und Synchronisations-Flags (`--fsync`/`--fdatasync`).
 
 ---
 

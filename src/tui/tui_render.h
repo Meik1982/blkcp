@@ -48,8 +48,10 @@ typedef enum tui_field_id {
     FIELD_OPT_FORCE,
     FIELD_OPT_SPARSE,
     FIELD_OPT_SYNC,
+    FIELD_OPT_DRY_RUN,
     FIELD_STATUS,
     FIELD_BTN_START,
+    FIELD_BTN_SIMULATE,
     FIELD_BTN_COPY,
     FIELD_BTN_QUIT,
     FIELD_COUNT_TOTAL
@@ -79,6 +81,7 @@ typedef struct tui_form {
     bool opt_force;
     bool opt_sparse;
     bool opt_sync;
+    bool opt_dry_run;
 
     /* Telemetry verbosity */
     int status_mode; /* 0=quiet (-q), 1=default, 2=progress (-p) */

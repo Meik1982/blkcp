@@ -127,6 +127,7 @@ Das Projekt beinhaltet einen vollwertigen Terminal-Assistenten auf Basis von `nc
 * **Direktes Byte-Limit & Parameter:** Intuitive Konfiguration von Limits (`-l`), Blockgrößen (`-b`), Skip/Seek und Direkt-I/O (`--direct`, `--sparse`, `--sync`).
 * **Live-Telemetrie & Streaming-Hash:** Echtzeit-Fortschrittsbalken, Transferrate und Anzeige des Streaming-SHA-256-Hashes direkt im TUI-Fenster.
 * **Clipboard-Integration:** Exportiert den exakt generierten CLI-Befehl auf Tastendruck (`c`) direkt in die Wayland-/X11-Zwischenablage.
+* **Dry-Run Planungs-Simulation:** Dedizierter `[ DRY-RUN (s) ]` Button und Checkbox (`-n`) mit interaktivem Ausführungsplan-Modal (prüft Ziel-Mounts und Treiber-Heuristiken völlig ohne Schreiboperationen).
 * **Sicherheits-Dialog:** Bestätigungsabfrage vor Schreibzugriffen auf physische Datenträger.
 
 ---

@@ -136,6 +136,7 @@ blkcp -i image.raw -o /dev/sdb --dry-run --json
 * **Engine Switching on the Fly:** Toggle between `io_uring`, `async`, `reflink`, `splice`, `sync`, and `auto` with Space.
 * **Live Telemetry & In-Flight Hash:** Real-time speed charts, progress bars, and streaming SHA-256 hash displayed directly in the UI.
 * **Clipboard Integration:** Press `c` to export the exact generated command to your system clipboard (Wayland / X11).
+* **Dry-Run Plan Simulation:** Dedicated `[ DRY-RUN (s) ]` button and `-n` checkbox with an interactive execution plan modal (inspect mount safety and driver parameters with zero writes).
 * **Safety Verification Dialog:** Dedicated confirmation modal before issuing writes to physical block devices.
 
 ```bash

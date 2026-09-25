@@ -31,7 +31,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Moderne POSIX/GNU-CLI (`src/args.c`):**
   `-i`, `-o`, `-b`, `-e`, `-l`, `-p`, `-q`, `-f`, `--hash`, `--autotune`, `--direct`, `--nocache`, `--sparse`, `--sync`, `--swab`, `--noerror` und intuitive Positionsargumente.
 - [x] **Interaktive 2D-Spatial TUI (`src/tui/` - `blkcp-tui`):**
-  Vollständiger ncursesw-Assistent mit Engine-Selector, Byteziel, Live-Telemetrie und Clipboard-Export.
+  Vollständiger ncursesw-Assistent mit Engine-Selector, Byteziel, Live-Telemetrie, Clipboard-Export, interaktivem Dry-Run Planungs-Modal (`-n` / `[ DRY-RUN (s) ]`) und Bestätigungsdialogen vor Schreibzugriffen.
 - [x] **Target Safety Guard & Streaming SHA-256:**
   Schutz gegen versehentliches Überschreiben gemounteter Partitionen und aktiver Swaps; parallele Prüfsummenberechnung im Hot-Loop.
 - [x] **Qualitätssicherung & Dokumentation:**

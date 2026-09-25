@@ -121,6 +121,9 @@ tui_build_command(tui_form_t const *form, char const *blkcp_bin, char *cmd, size
     if (form->opt_force) {
         snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -f");
     }
+    if (form->opt_dry_run) {
+        snprintf(buf + strlen(buf), sizeof(buf) - strlen(buf), " -n");
+    }
 
     /* Status level */
     if (form->status_mode == 0) {
@@ -240,6 +243,8 @@ tui_render(WINDOW *win, tui_form_t const *form)
     draw_checkbox(win, 16, 2, "Sparse Punch-Hole (--sparse)", form->opt_sparse, form->active_field == FIELD_OPT_SPARSE);
     draw_checkbox(win, 16, 38, "Zero Padding Short Reads (--sync)", form->opt_sync, form->active_field == FIELD_OPT_SYNC);
 
+    draw_checkbox(win, 17, 2, "Dry-Run Simulation (-n)", form->opt_dry_run, form->active_field == FIELD_OPT_DRY_RUN);
+
     /* Section 4: Telemetrie */
     mvwprintw(win, 18, 2, "Status: (%c) Quiet (-q)  (%c) Standard  (%c) Progress (-p)  (%c) NDJSON (--json)",
               form->status_mode == 0 ? '*' : ' ',
@@ -321,9 +326,10 @@ tui_render(WINDOW *win, tui_form_t const *form)
 
     /* Action Buttons */
     int btn_y = 27;
-    draw_button(win, btn_y, 6, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
-    draw_button(win, btn_y, 29, "BEFEHL KOPIEREN (c)", form->active_field == FIELD_BTN_COPY, 4);/* Blue */
-    draw_button(win, btn_y, 56, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
+    draw_button(win, btn_y, 4, "START (Enter)", form->active_field == FIELD_BTN_START, 2);      /* Green */
+    draw_button(win, btn_y, 23, "DRY-RUN (s)", form->active_field == FIELD_BTN_SIMULATE, 3);    /* Yellow */
+    draw_button(win, btn_y, 39, "KOPIEREN (c)", form->active_field == FIELD_BTN_COPY, 4);      /* Blue */
+    draw_button(win, btn_y, 57, "BEENDEN (Esc/q)", form->active_field == FIELD_BTN_QUIT, 1);   /* Red */
 
     wrefresh(win);
 }

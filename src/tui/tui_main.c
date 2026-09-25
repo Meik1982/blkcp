@@ -133,10 +133,128 @@ copy_to_clipboard(tui_form_t *form, char const *cmd)
 }
 
 static void
+show_dry_run_plan_modal(char const *plan_text)
+{
+    int win_h = 16;
+    int win_w = 76;
+    int start_y = (LINES - win_h) / 2;
+    int start_x = (COLS - win_w) / 2;
+
+    WINDOW *w = newwin(win_h, win_w, start_y, start_x);
+    keypad(w, TRUE);
+
+    werase(w);
+    wattron(w, COLOR_PAIR(3) | A_BOLD);
+    box(w, 0, 0);
+    mvwprintw(w, 0, 2, " [ DRY-RUN EXECUTION PLAN (SIMULATION) ] ");
+    wattroff(w, COLOR_PAIR(3) | A_BOLD);
+
+    char buf[4096];
+    snprintf(buf, sizeof buf, "%s", plan_text);
+    char *line = strtok(buf, "\n");
+    int line_y = 2;
+
+    while (line && line_y < win_h - 2) {
+        if (strstr(line, "BLOCKED")) {
+            wattron(w, COLOR_PAIR(1) | A_BOLD);
+            mvwprintw(w, line_y, 2, "%-71.71s", line);
+            wattroff(w, COLOR_PAIR(1) | A_BOLD);
+        } else if (strstr(line, "Safety Guard: OK") || strstr(line, "OVERRIDDEN")) {
+            wattron(w, COLOR_PAIR(2) | A_BOLD);
+            mvwprintw(w, line_y, 2, "%-71.71s", line);
+            wattroff(w, COLOR_PAIR(2) | A_BOLD);
+        } else if (strncmp(line, "=== ", 4) == 0) {
+            wattron(w, A_BOLD | COLOR_PAIR(4));
+            mvwprintw(w, line_y, 2, "%-71.71s", line);
+            wattroff(w, A_BOLD | COLOR_PAIR(4));
+        } else if (strncmp(line, "Note:", 5) == 0) {
+            wattron(w, A_DIM | COLOR_PAIR(3));
+            mvwprintw(w, line_y, 2, "%-71.71s", line);
+            wattroff(w, A_DIM | COLOR_PAIR(3));
+        } else {
+            mvwprintw(w, line_y, 2, "%-71.71s", line);
+        }
+        line = strtok(NULL, "\n");
+        line_y++;
+    }
+
+    wattron(w, A_BOLD | COLOR_PAIR(3));
+    mvwprintw(w, win_h - 2, 2, "Druecke [ Beliebige Taste / Esc ] zum Schliessen...");
+    wattroff(w, A_BOLD | COLOR_PAIR(3));
+
+    wrefresh(w);
+    wgetch(w);
+    delwin(w);
+}
+
+static void
+execute_dry_run_simulation(WINDOW *main_win, tui_form_t *form)
+{
+    if (form->if_path[0] == '\0' || form->of_path[0] == '\0') {
+        snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: Bitte Input (-i) und Output (-o) angeben!");
+        return;
+    }
+
+    char full_bin[600] = "./blkcp";
+    char cwd[512];
+    if (getcwd(cwd, sizeof cwd)) {
+        snprintf(full_bin, sizeof full_bin, "%.500s/blkcp", cwd);
+    }
+
+    bool orig_dry = form->opt_dry_run;
+    form->opt_dry_run = true;
+    char cmd_body[1600];
+    tui_build_command(form, full_bin, cmd_body, sizeof cmd_body);
+    form->opt_dry_run = orig_dry;
+
+    char full_cmd[2048];
+    snprintf(full_cmd, sizeof full_cmd, "%s 2>&1", cmd_body);
+
+    snprintf(form->status_msg, sizeof form->status_msg, "Simuliere Ausfuehrungsplan (Dry-Run)...");
+    tui_render(main_win, form);
+
+    FILE *fp = popen(full_cmd, "r");
+    if (!fp) {
+        snprintf(form->status_msg, sizeof form->status_msg, "Fehler beim Starten der Simulation!");
+        return;
+    }
+
+    char plan_buf[4096] = "";
+    char line[512];
+    bool is_blocked = false;
+
+    while (fgets(line, sizeof line, fp)) {
+        if (strlen(plan_buf) + strlen(line) < sizeof(plan_buf) - 1) {
+            strcat(plan_buf, line);
+        }
+        if (strstr(line, "BLOCKED")) {
+            is_blocked = true;
+        }
+    }
+    pclose(fp);
+
+    if (plan_buf[0] != '\0') {
+        show_dry_run_plan_modal(plan_buf);
+        if (is_blocked) {
+            snprintf(form->status_msg, sizeof form->status_msg, "Dry-Run: Ziel MUESSTE mit -f uebersteuert werden (BLOCKED)!");
+        } else {
+            snprintf(form->status_msg, sizeof form->status_msg, "Dry-Run Plan OK: 0 Bytes geschrieben (Sicher).");
+        }
+    } else {
+        snprintf(form->status_msg, sizeof form->status_msg, "Dry-Run Simulation beendet.");
+    }
+}
+
+static void
 execute_blkcp_job(WINDOW *main_win, tui_form_t *form)
 {
     if (form->if_path[0] == '\0' || form->of_path[0] == '\0') {
         snprintf(form->status_msg, sizeof form->status_msg, "FEHLER: Bitte Input (-i) und Output (-o) angeben!");
+        return;
+    }
+
+    if (form->opt_dry_run) {
+        execute_dry_run_simulation(main_win, form);
         return;
     }
 
@@ -287,6 +405,8 @@ main(void)
                 form.opt_sparse = !form.opt_sparse;
             else if (form.active_field == FIELD_OPT_SYNC)
                 form.opt_sync = !form.opt_sync;
+            else if (form.active_field == FIELD_OPT_DRY_RUN)
+                form.opt_dry_run = !form.opt_dry_run;
             else if (form.active_field == FIELD_STATUS)
                 form.status_mode = (form.status_mode + 1) % 4;
             break;
@@ -343,10 +463,14 @@ main(void)
                 form.opt_sparse = !form.opt_sparse;
             } else if (form.active_field == FIELD_OPT_SYNC) {
                 form.opt_sync = !form.opt_sync;
+            } else if (form.active_field == FIELD_OPT_DRY_RUN) {
+                form.opt_dry_run = !form.opt_dry_run;
             } else if (form.active_field == FIELD_STATUS) {
                 form.status_mode = (form.status_mode + 1) % 4;
             } else if (form.active_field == FIELD_BTN_START) {
                 execute_blkcp_job(win, &form);
+            } else if (form.active_field == FIELD_BTN_SIMULATE) {
+                execute_dry_run_simulation(win, &form);
             } else if (form.active_field == FIELD_BTN_COPY) {
                 char cmd[1024];
                 tui_build_command(&form, "./blkcp", cmd, sizeof cmd);
@@ -363,6 +487,13 @@ main(void)
             copy_to_clipboard(&form, cmd);
             break;
         }
+
+        case 's':
+        case 'S':
+        case 'd':
+        case 'D':
+            execute_dry_run_simulation(win, &form);
+            break;
 
         case 'q':
         case 'Q':

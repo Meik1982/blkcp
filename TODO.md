@@ -57,13 +57,26 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Sparse Hole-Punching & Trailing-Seek Härtung (`--sparse`):**
   Lückenlose Sparse-Dateigenerierung via `lseek(SEEK_CUR)` und atomare Finalisierung über `ftruncate` am Dateiende in `src/io_engine.c`, falls die Datei mit einem Null-Block abschließt. Verifiziert mit tatsächlicher Disk-Block-Reduktion via `stat -c %b`.
 - [x] **Vollständige Qualitätssicherung & Regressionstests:**
-  39/39 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`), Synchronisations-Flags (`--fsync`/`--fdatasync`) und Multi-Ring `io_uring` Sharding.
+  40/40 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`), Synchronisations-Flags (`--fsync`/`--fdatasync`), Multi-Ring `io_uring` Sharding sowie Edge-Case-Tests (Unaligned Chunk-Grenzen, Tiny Files, High-Concurrency `-j 16`, Direct I/O).
 - [x] **Multi-Ring io_uring Sharding (`-j`, `--threads`, `--shards`):**
-  Paralleles Sharding mehrerer Submission-/Completion-Rings über dedizierte CPU-Worker (`pthread`) für High-End Multi-Queue NVMe-Controller und parallele Flash-Arrays. Dynamisches Work-Stealing über 64-MiB-Chunks via atomaren Offset (`atomic_uint_fast64_t`). Vollwertige Fallback-Absicherung auf Single-Ring bei Streaming-Prüfsummen (`--hash` / SHA-256) und nicht-seekable Streams (Pipes/FIFOs/Sockets). In Regressionstest 39 verifiziert.
+  Paralleles Sharding mehrerer Submission-/Completion-Rings über dedizierte CPU-Worker (`pthread`) für High-End Multi-Queue NVMe-Controller und parallele Flash-Arrays. Dynamisches Work-Stealing über 64-MiB-Chunks via atomaren Offset (`atomic_uint_fast64_t`). Vollwertige Fallback-Absicherung auf Single-Ring bei Streaming-Prüfsummen (`--hash` / SHA-256) und nicht-seekable Streams (Pipes/FIFOs/Sockets). In Regressionstests 39 & 40 verifiziert.
 
 ---
 
-## 2. Zukünftige optionale Erweiterungen
+## 2. Geplante Code-Härtung & Security-Maßnahmen
+
+- [ ] **Compiler- & Linker-Hardening (`Makefile`):**
+  - Standardmäßige Härtungs-Flags für alle Builds verankern: `-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie` sowie Linker-Hardening (`-Wl,-z,relro,-z,now`, `-Wl,-z,defs`).
+- [ ] **Statische Tiefenanalyse (`GCC -fanalyzer` / `clang-tidy`):**
+  - Dediziertes Target `make analyze` im `Makefile` zur Erkennung potenzieller Ressourcen-Leaks, uninitialisierter Variablenpfade und hypothetischer Deadlocks im Multi-Threading-Code.
+- [ ] **Linux Seccomp-BPF Sandboxing:**
+  - Optionale Syscall-Filterung via `libseccomp` nach der Initialisierungs- und Startup-Phase: Blockiert netzwerk- und prozessbezogene Syscalls (`socket`, `connect`, `execve`, `fork`, `ptrace`), da `blkcp` nach dem Öffnen der Deskriptoren nur noch reine Datei- und I/O-Syscalls benötigt.
+- [ ] **Systematische Fault-Injection-Tests:**
+  - Hinzufügen von Testszenarien, die I/O-Fehler (`EIO`, `ENOSPC`, unerwartetes EOF) mitten in einem Sharded Multi-Ring-Transfer simulieren, um sicherzustellen, dass alle Worker-Rings ohne Verklemmungen und atomar sauber abräumen.
+
+---
+
+## 3. Zukünftige funktionale Erweiterungen
 
 - [ ] **Paralleler Tree-Hash (Merkle-Tree / BLAKE3 / Parallel SHA-256):**
   - Optionale parallele Prüfsummenberechnung über separate Chunks bei Multi-Ring Sharding ohne Sequentialisierungs-Zwang.

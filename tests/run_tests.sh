@@ -441,4 +441,26 @@ cat "$TMP_DIR/shard_in.bin" | $BLKCP_BIN -o "$TMP_DIR/shard_pipe.bin" -j 4 -q
 cmp "$TMP_DIR/shard_in.bin" "$TMP_DIR/shard_pipe.bin"
 echo "Test 39 passed: Multi-Ring io_uring Sharding (-j / --threads, dynamic chunking, --hash fallback)"
 
-echo "=== All 39 modern blkcp tests passed successfully! ==="
+# Test 40: Multi-Ring Sharding Edge Cases (High concurrency -j 8/-j 16, unaligned size, tiny file, direct I/O)
+# 40a: Tiny file with high shard count (512 bytes with -j 8)
+dd if=/dev/urandom of="$TMP_DIR/tiny_in.bin" bs=512 count=1 status=none
+$BLKCP_BIN -i "$TMP_DIR/tiny_in.bin" -o "$TMP_DIR/tiny_out.bin" -j 8 -e uring -q
+cmp "$TMP_DIR/tiny_in.bin" "$TMP_DIR/tiny_out.bin"
+
+# 40b: Unaligned byte count crossing block & chunk boundaries (7,341,209 bytes with -j 4)
+dd if=/dev/urandom of="$TMP_DIR/unaligned_in.bin" bs=1048576 count=7 status=none
+dd if=/dev/urandom bs=1 count=9 status=none >> "$TMP_DIR/unaligned_in.bin"
+$BLKCP_BIN -i "$TMP_DIR/unaligned_in.bin" -o "$TMP_DIR/unaligned_out.bin" -j 4 -e uring -q
+cmp "$TMP_DIR/unaligned_in.bin" "$TMP_DIR/unaligned_out.bin"
+
+# 40c: High concurrency (-j 16) with larger file (32 MiB)
+dd if=/dev/urandom of="$TMP_DIR/large_in.bin" bs=1M count=32 status=none
+$BLKCP_BIN -i "$TMP_DIR/large_in.bin" -o "$TMP_DIR/large_out.bin" -j 16 -e uring -q
+cmp "$TMP_DIR/large_in.bin" "$TMP_DIR/large_out.bin"
+
+# 40d: Direct I/O combined with Multi-Ring Sharding (--direct -j 4)
+$BLKCP_BIN -i "$TMP_DIR/large_in.bin" -o "$TMP_DIR/large_direct_out.bin" --direct -j 4 -e uring -q
+cmp "$TMP_DIR/large_in.bin" "$TMP_DIR/large_direct_out.bin"
+echo "Test 40 passed: Multi-Ring Sharding Edge Cases (High concurrency -j 8/-j 16, unaligned size, tiny file, direct I/O)"
+
+echo "=== All 40 modern blkcp tests passed successfully! ==="

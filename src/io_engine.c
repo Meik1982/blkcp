@@ -657,8 +657,9 @@ dd_select_io_driver (dd_context_t *ctx)
       bool is_in_blk = (fstat (STDIN_FILENO, &st_in) == 0 && S_ISBLK (st_in.st_mode));
       bool is_out_blk = (fstat (STDOUT_FILENO, &st_out) == 0 && S_ISBLK (st_out.st_mode));
       bool is_direct = (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT);
+      bool is_multi_thread = (ctx->cfg.threads > 1);
 
-      if (is_in_blk || is_out_blk || is_direct)
+      if (is_in_blk || is_out_blk || is_direct || is_multi_thread)
         return &uring_io_driver;
     }
 

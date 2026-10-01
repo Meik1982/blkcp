@@ -90,6 +90,7 @@ blkcp source.bin destination.bin -e uring -p
 
 ### 1. Linux `io_uring` Asynchronous Engine (`-e uring`)
 Nutzt liburing für asynchrones, unterbrechungsfreies Double-Buffering direkt auf Kernel-Queue-Ebene. Minimiert Syscall-Overhead und Kontextwechsel für maximale Bus-Auslastung auf modernen NVMe-SSDs.
+* **Multi-Ring Sharding:** Mit `-j <N>` bzw. `--threads=<N>` skaliert `blkcp` über $N$ parallele Worker-Threads mit jeweils eigener `io_uring`-Instanz und dynamischem 64-MiB Work-Stealing für Multi-Queue-SSDs. Inklusive automatischer Fallbacks bei linearen Hashes (`--hash`) oder Pipes.
 
 ### 2. Multi-Threaded Double-Buffering Ringpuffer (`-e async`)
 Entkoppelt Lesestrom und Schreibstrom über einen speichereffizienten POSIX-Ringpuffer. Verhindert, dass langsame Ausgabemedien (z. B. USB-Sticks) den Lesevorgang blockieren.

@@ -70,6 +70,7 @@ Core Options:\n\
                              'auto'     Intelligent auto-detection (default)\n\
   -l, --limit=BYTES        Limit copy to exactly BYTES bytes (aliases: -s, --size)\n\
   -c, --count=N            Copy only N input blocks\n\
+  -j, --threads=N          Parallel worker threads / io_uring shards (default: 1)\n\
   -p, --progress           Show periodic real-time transfer telemetry and speed\n\
       --json               Emit machine-readable NDJSON telemetry on stderr\n\
       --queue-depth=N      Async ringbuffer queue depth (2..1024 slots; default: auto)\n\

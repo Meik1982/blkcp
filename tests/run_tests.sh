@@ -413,4 +413,32 @@ $BLKCP_BIN -i "$TMP_DIR/rand_direct_in.bin" -o "$TMP_DIR/rand_fdatasync_out.bin"
 cmp "$TMP_DIR/rand_direct_in.bin" "$TMP_DIR/rand_fdatasync_out.bin"
 echo "Test 38 passed: Synchronization flags (--fsync and --fdatasync)"
 
-echo "=== All 38 modern blkcp tests passed successfully! ==="
+# Test 39: Multi-Ring io_uring Sharding (-j / --threads, dynamic chunking, --hash fallback)
+dd if=/dev/urandom of="$TMP_DIR/shard_in.bin" bs=1M count=16 status=none
+$BLKCP_BIN -i "$TMP_DIR/shard_in.bin" -o "$TMP_DIR/shard_out.bin" -j 4 -e uring -q
+cmp "$TMP_DIR/shard_in.bin" "$TMP_DIR/shard_out.bin"
+
+# Alias --threads=4 with custom block size
+$BLKCP_BIN -i "$TMP_DIR/shard_in.bin" -o "$TMP_DIR/shard_out2.bin" --threads=4 -b 2M -q
+cmp "$TMP_DIR/shard_in.bin" "$TMP_DIR/shard_out2.bin"
+
+# Partial byte limit with multiple worker shards
+$BLKCP_BIN -i "$TMP_DIR/shard_in.bin" -o "$TMP_DIR/shard_limit.bin" -j 4 -l 5242880 -q
+head -c 5242880 "$TMP_DIR/shard_in.bin" > "$TMP_DIR/shard_limit_ref.bin"
+cmp "$TMP_DIR/shard_limit_ref.bin" "$TMP_DIR/shard_limit.bin"
+
+# Option 2A: --hash falls back to single-ring to guarantee bit-exact standard SHA-256
+HASH_EXPECTED=$(sha256sum "$TMP_DIR/shard_in.bin" | awk '{print $1}')
+HASH_ACTUAL=$($BLKCP_BIN -i "$TMP_DIR/shard_in.bin" -o "$TMP_DIR/shard_hash.bin" -j 4 --hash 2>&1 | grep "sha256:" | awk '{print $2}')
+if [ "$HASH_EXPECTED" != "$HASH_ACTUAL" ]; then
+  echo "Error: Hash mismatch in multi-ring fallback: $HASH_EXPECTED != $HASH_ACTUAL" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/shard_in.bin" "$TMP_DIR/shard_hash.bin"
+
+# Non-seekable stream fallback (stdin pipe with -j 4)
+cat "$TMP_DIR/shard_in.bin" | $BLKCP_BIN -o "$TMP_DIR/shard_pipe.bin" -j 4 -q
+cmp "$TMP_DIR/shard_in.bin" "$TMP_DIR/shard_pipe.bin"
+echo "Test 39 passed: Multi-Ring io_uring Sharding (-j / --threads, dynamic chunking, --hash fallback)"
+
+echo "=== All 39 modern blkcp tests passed successfully! ==="

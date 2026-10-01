@@ -6,6 +6,7 @@ _blkcp() {
         '(-o --output)'{-o,--output}'[Output file or block device]:output file:_files' \
         '(-b --block-size)'{-b,--block-size}'[Block size or auto]:block size:(auto 512 4096 64K 1M 4M 8M)' \
         '(-c --count)'{-c,--count}'[Number of blocks to transfer]:blocks count:' \
+        '(-j --threads --shards)'{-j,--threads,--shards}'[Number of parallel worker threads / io_uring shards]:threads count:' \
         '(-l --limit)'{-l,--limit}'[Exact byte transfer limit]:bytes limit:' \
         '(-p --progress)'{-p,--progress}'[Display progress bar on stderr]' \
         '(-q --quiet)'{-q,--quiet}'[Suppress progress and final transfer stats]' \

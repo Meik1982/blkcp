@@ -130,6 +130,7 @@ typedef struct dd_config
   int status_level;               /**< Telemetry verbosity (none, noxfer, progress, json, default) */
   bool json_output;               /**< Emit machine-readable NDJSON telemetry */
   size_t async_queue_depth;       /**< Ringbuffer queue capacity for async engine (0 = dynamic auto) */
+  int threads;                    /**< Parallel worker threads / io_uring shards (-j / --threads; default 1) */
   bool i_nocache;                 /**< Discard input cache after every block read */
   bool o_nocache;                 /**< Discard output cache after every block write */
   bool i_nocache_eof;             /**< Discard entire input cache at EOF */

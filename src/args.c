@@ -63,6 +63,8 @@ static struct option const modern_long_options[] =
   {"json",         no_argument,       NULL, OPT_JSON},
   {"queue-depth",  required_argument, NULL, OPT_QUEUE_DEPTH},
   {"async-queue",  required_argument, NULL, OPT_QUEUE_DEPTH},
+  {"threads",      required_argument, NULL, 'j'},
+  {"shards",       required_argument, NULL, 'j'},
   {"quiet",        no_argument,       NULL, 'q'},
   {"force",        no_argument,       NULL, 'f'},
   {"dry-run",      no_argument,       NULL, 'n'},
@@ -128,6 +130,7 @@ dd_init_default_config (dd_config_t *cfg)
   cfg->max_records = INTMAX_MAX;
   cfg->max_bytes = 0;
   cfg->bytes_to_copy = -1;
+  cfg->threads = 1;
   cfg->status_level = STATUS_DEFAULT;
 }
 
@@ -141,7 +144,7 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
 
   optind = 1;
   int c;
-  while ((c = getopt_long (argc, (char **) argv, "i:o:b:e:l:s:c:pqfnhv", modern_long_options, NULL)) != -1)
+  while ((c = getopt_long (argc, (char **) argv, "i:o:b:e:l:s:c:j:pqfnhv", modern_long_options, NULL)) != -1)
     {
       switch (c)
         {
@@ -240,6 +243,17 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
           break;
         case 'q':
           cfg->status_level = STATUS_NONE;
+          break;
+        case 'j':
+          {
+            strtol_error invalid = LONGINT_OK;
+            intmax_t th = parse_integer (optarg, &invalid);
+            if (invalid != LONGINT_OK || th <= 0 || th > 1024)
+              error (EXIT_FAILURE, invalid == LONGINT_OVERFLOW ? EOVERFLOW : 0,
+                     "%s: %s (must be between 1 and 1024)",
+                     _("invalid thread count"), quoteaf (optarg));
+            cfg->threads = (int) th;
+          }
           break;
         case 'f':
           cfg->output_flags |= O_FORCE;

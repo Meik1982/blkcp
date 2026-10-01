@@ -46,6 +46,9 @@ Exact transfer byte limit regardless of block alignment.
 \fB\-c\fR, \fB\-\-count\fR=\fI\,N\/\fR
 Copy only \fIN\fR input blocks.
 .TP
+\fB\-j\fR, \fB\-\-threads\fR=\fI\,N\/\fR, \fB\-\-shards\fR=\fI\,N\/\fR
+Number of parallel worker threads / io_uring shards (default: 1). When N > 1, the \fBuring\fR engine instantiates N independent submission/completion rings across dynamic 64-MiB work chunks for maximum throughput on multi-queue NVMe devices.
+.TP
 \fB\-p\fR, \fB\-\-progress\fR
 Display live real-time transfer telemetry and transfer speeds on stderr.
 .TP

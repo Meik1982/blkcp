@@ -9,6 +9,8 @@ complete -c blkcp -s l -l limit -d "Exact byte transfer limit" -x
 complete -c blkcp -s s -l size -d "Exact byte transfer limit alias" -x
 complete -c blkcp -l bytes -d "Exact byte transfer limit alias" -x
 complete -c blkcp -s c -l count -d "Number of blocks to transfer" -x
+complete -c blkcp -s j -l threads -d "Parallel worker threads / io_uring shards" -x
+complete -c blkcp -l shards -d "Parallel io_uring shards alias" -x
 complete -c blkcp -s p -l progress -d "Display real-time transfer progress"
 complete -c blkcp -l json -d "Emit machine-readable NDJSON telemetry"
 complete -c blkcp -l queue-depth -d "Async ringbuffer queue depth (2..1024 slots)" -x

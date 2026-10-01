@@ -159,7 +159,7 @@ src/
 ├── args.h / .c             # Modern POSIX/GNU CLI parser (getopt_long)
 ├── io_driver.h             # Strategy-pattern driver abstraction (dd_io_driver_t)
 ├── io_engine.h / .c        # Master control loop, Safety Guard & Direct I/O fallback
-├── io_uring.c              # Linux io_uring driver with fixed buffers & batch reaping
+├── io_uring.c              # Linux io_uring driver with fixed buffers, batch reaping & Multi-Ring Sharding (-j)
 ├── io_async.c              # Multi-threaded ringbuffer engine with adaptive scaling
 ├── io_reflink.c            # Linux copy_file_range(2) zero-copy engine
 ├── io_splice.c             # In-kernel splice(2) zero-copy pipe streaming engine

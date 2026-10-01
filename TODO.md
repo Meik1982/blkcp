@@ -57,11 +57,13 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Sparse Hole-Punching & Trailing-Seek Härtung (`--sparse`):**
   Lückenlose Sparse-Dateigenerierung via `lseek(SEEK_CUR)` und atomare Finalisierung über `ftruncate` am Dateiende in `src/io_engine.c`, falls die Datei mit einem Null-Block abschließt. Verifiziert mit tatsächlicher Disk-Block-Reduktion via `stat -c %b`.
 - [x] **Vollständige Qualitätssicherung & Regressionstests:**
-  38/38 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`) und Synchronisations-Flags (`--fsync`/`--fdatasync`).
+  39/39 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`), Synchronisations-Flags (`--fsync`/`--fdatasync`) und Multi-Ring `io_uring` Sharding.
+- [x] **Multi-Ring io_uring Sharding (`-j`, `--threads`, `--shards`):**
+  Paralleles Sharding mehrerer Submission-/Completion-Rings über dedizierte CPU-Worker (`pthread`) für High-End Multi-Queue NVMe-Controller und parallele Flash-Arrays. Dynamisches Work-Stealing über 64-MiB-Chunks via atomaren Offset (`atomic_uint_fast64_t`). Vollwertige Fallback-Absicherung auf Single-Ring bei Streaming-Prüfsummen (`--hash` / SHA-256) und nicht-seekable Streams (Pipes/FIFOs/Sockets). In Regressionstest 39 verifiziert.
 
 ---
 
 ## 2. Zukünftige optionale Erweiterungen
 
-- [ ] **Multi-Ring io_uring Sharding:**
-  - Paralleles Sharding mehrerer Submission-Rings über dedizierte CPU-Cores bei High-End Multi-Queue NVMe-Controllern.
+- [ ] **Paralleler Tree-Hash (Merkle-Tree / BLAKE3 / Parallel SHA-256):**
+  - Optionale parallele Prüfsummenberechnung über separate Chunks bei Multi-Ring Sharding ohne Sequentialisierungs-Zwang.

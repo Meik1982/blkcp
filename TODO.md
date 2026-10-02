@@ -78,5 +78,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 ## 3. Zukünftige funktionale Erweiterungen
 
-- [ ] **Paralleler Tree-Hash (Merkle-Tree / BLAKE3 / Parallel SHA-256):**
-  - Optionale parallele Prüfsummenberechnung über separate Chunks bei Multi-Ring Sharding ohne Sequentialisierungs-Zwang.
+- [ ] **Paralleler High-Speed Integritätshash (`--hash=blake3` / Tree-Hash):**
+  - Ergänzung zu `--hash=sha256`: Nutzung von BLAKE3 für hardwarenahe Datenintegritätsprüfung ohne Single-Core-Flaschenhals.
+  - Jeder Shard-Worker hasht seine 64-MiB-Chunks parallel via AVX2/AVX-512/NEON direkt im Speicher während des I/O-Transfers; die Sub-Hashes werden deterministisch im Merkle-Baum zusammengeführt.
+  - Erkennt lautlose Übertragungs- und Bit-Flip-Fehler (Silent Data Corruption) bei voller NVMe-Bandbreite (10+ GB/s) und bleibt 1:1 kompatibel zu `b3sum`.

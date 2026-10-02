@@ -492,10 +492,10 @@ uring_driver_init (dd_context_t *ctx, void **state)
   /* Check if Multi-Ring Sharding is requested and eligible */
   if (ctx->cfg.threads > 1)
     {
-      if (ctx->cfg.conversions_mask & C_SHA256)
+      if (ctx->cfg.conversions_mask & (C_SHA256 | C_BLAKE3))
         {
           if (ctx->cfg.status_level != STATUS_NONE)
-            dd_diagnose (0, _("io_uring: --hash requires sequential digest; falling back to single-ring mode"));
+            dd_diagnose (0, _("io_uring: in-flight checksum requires sequential stream; falling back to single-ring mode"));
         }
       else if (ctx->cfg.conversions_mask & (C_SPARSE | C_SWAB | C_SYNC | C_NOERROR))
         {
@@ -771,9 +771,11 @@ uring_driver_step (dd_context_t *ctx, void *state, bool *eof, bool *fallback)
         bytes_to_write = (size_t) max_allowed;
     }
 
-  /* Compute streaming SHA-256 for the exact written slice */
+  /* Compute streaming checksum for the exact written slice */
   if ((ctx->cfg.conversions_mask & C_SHA256) && bytes_to_write > 0 && ctx->sha_evp_ctx)
     EVP_DigestUpdate (ctx->sha_evp_ctx, st->slots[cur_write_slot].buf, bytes_to_write);
+  if ((ctx->cfg.conversions_mask & C_BLAKE3) && bytes_to_write > 0)
+    blake3_hasher_update (&((dd_context_t *) ctx)->b3_hasher, st->slots[cur_write_slot].buf, bytes_to_write);
 
   /* 1. Prepare Write SQE for completed read slot */
   struct io_uring_sqe *sqe_w = io_uring_get_sqe (&st->ring);

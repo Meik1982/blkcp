@@ -57,9 +57,11 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Sparse Hole-Punching & Trailing-Seek Härtung (`--sparse`):**
   Lückenlose Sparse-Dateigenerierung via `lseek(SEEK_CUR)` und atomare Finalisierung über `ftruncate` am Dateiende in `src/io_engine.c`, falls die Datei mit einem Null-Block abschließt. Verifiziert mit tatsächlicher Disk-Block-Reduktion via `stat -c %b`.
 - [x] **Vollständige Qualitätssicherung & Regressionstests:**
-  40/40 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`), Synchronisations-Flags (`--fsync`/`--fdatasync`), Multi-Ring `io_uring` Sharding sowie Edge-Case-Tests (Unaligned Chunk-Grenzen, Tiny Files, High-Concurrency `-j 16`, Direct I/O).
+  41/41 Regressionstests grün (`make test`, ASan/UBSan, TSan), 14 automatisierte Benchmarks, Doxygen in allen Headern, Manpage `man/blkcp.1`. Inklusive Negativtests für fehlerhafte Eingaben/Pfade, `--notrunc` Datenerhalt, Signal-Resilienz (`SIGUSR1`), Synchronisations-Flags (`--fsync`/`--fdatasync`), Multi-Ring `io_uring` Sharding sowie Edge-Case-Tests (Unaligned Chunk-Grenzen, Tiny Files, High-Concurrency `-j 16`, Direct I/O) und BLAKE3 Cross-Engine Verifikation.
 - [x] **Multi-Ring io_uring Sharding (`-j`, `--threads`, `--shards`):**
   Paralleles Sharding mehrerer Submission-/Completion-Rings über dedizierte CPU-Worker (`pthread`) für High-End Multi-Queue NVMe-Controller und parallele Flash-Arrays. Dynamisches Work-Stealing über 64-MiB-Chunks via atomaren Offset (`atomic_uint_fast64_t`). Vollwertige Fallback-Absicherung auf Single-Ring bei Streaming-Prüfsummen (`--hash` / SHA-256) und nicht-seekable Streams (Pipes/FIFOs/Sockets). In Regressionstests 39 & 40 verifiziert.
+- [x] **High-Speed In-Flight BLAKE3 Checksumming (`--hash=blake3`, `--blake3`):**
+  Hardwarenahe Prüfsummenberechnung via `libblake3` (SIMD/AVX2/AVX-512) direkt im Speicher während des I/O-Transfers für alle Treiber (`sync`, `async`, `uring`, `splice`, `reflink`). Ermöglicht 3+ GB/s Streaming-Integritätsprüfung zur Erkennung von Silent Data Corruption und Bit-Flips, 1:1 bitgenau kompatibel zu `b3sum`. Inklusive vollständiger NDJSON-Telemetrie (`--json`), CLI-Shortcuts und Regressionstest 41.
 
 ---
 
@@ -78,7 +80,5 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 ## 3. Zukünftige funktionale Erweiterungen
 
-- [ ] **Paralleler High-Speed Integritätshash (`--hash=blake3` / Tree-Hash):**
-  - Ergänzung zu `--hash=sha256`: Nutzung von BLAKE3 für hardwarenahe Datenintegritätsprüfung ohne Single-Core-Flaschenhals.
-  - Jeder Shard-Worker hasht seine 64-MiB-Chunks parallel via AVX2/AVX-512/NEON direkt im Speicher während des I/O-Transfers; die Sub-Hashes werden deterministisch im Merkle-Baum zusammengeführt.
-  - Erkennt lautlose Übertragungs- und Bit-Flip-Fehler (Silent Data Corruption) bei voller NVMe-Bandbreite (10+ GB/s) und bleibt 1:1 kompatibel zu `b3sum`.
+- [ ] **Paralleler Multi-Ring Tree-Hash Zusammenführer (Inter-Chunk Merkle Combiner):**
+  - Paralleles Hashen einzelner 64-MiB-Chunks in Worker-Threads mit anschließender deterministischer Reduktion im Merkle-Baum bei Multi-Ring Sharding (`-j N`) ohne Single-Ring-Fallback.

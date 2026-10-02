@@ -1,7 +1,7 @@
 CC ?= gcc
 CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
 LDFLAGS ?= 
-LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring
+LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring -lblake3
 
 TARGET = blkcp
 TARGET_TUI = blkcp-tui

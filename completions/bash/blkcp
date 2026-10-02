@@ -5,9 +5,13 @@ _blkcp() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="-i --input -o --output -b --block-size -c --count -j --threads --shards -l --limit -p --progress -q --quiet -e --engine -f --force -n --dry-run --direct --nocache --hash --json --autotune --swab --sync --help --version"
+    opts="-i --input -o --output -b --block-size -c --count -j --threads --shards -l --limit -p --progress -q --quiet -e --engine -f --force -n --dry-run --direct --nocache --hash --sha256 --blake3 --json --autotune --swab --sync --help --version"
 
     case "${prev}" in
+        --hash)
+            COMPREPLY=( $(compgen -W "sha256 blake3" -- "${cur}") )
+            return 0
+            ;;
         -e|--engine)
             COMPREPLY=( $(compgen -W "auto uring async reflink splice sync" -- "${cur}") )
             return 0

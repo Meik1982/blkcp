@@ -15,7 +15,9 @@ _blkcp() {
         '(-n --dry-run)'{-n,--dry-run}'[Simulate execution and print plan without writing]' \
         '--direct[Use Direct I/O (O_DIRECT)]' \
         '--nocache[Evict cache after copy]' \
-        '--hash[Compute in-flight SHA-256 digest]' \
+        '--hash=-[Compute in-flight cryptographic digest]:hash algorithm:(sha256 blake3)' \
+        '--sha256[Compute in-flight SHA-256 digest]' \
+        '--blake3[Compute high-speed in-flight BLAKE3 tree-hash]' \
         '--json[Emit machine-readable NDJSON telemetry]' \
         '--autotune[Automatically benchmark and select optimal block size]' \
         '--swab[Byte-swap 16-bit word pairs]' \

@@ -21,7 +21,7 @@ It completely eliminates legacy 1970s `key=value` syntax (`if=`, `of=`, `ibs=`, 
 | **Endian Byte Swapping (`--swab`)** | 4.50 GB/s (scalar) | **13.50 GB/s (AVX2/SSSE3)** | **+200.0%** ⚡ |
 | **Kernel Reflink Cloning (`-e reflink`)**| 3.50 GB/s | **3.80 GB/s (Zero-Copy)** | **+8.6%** |
 | **Kernel Splice Streaming (`-e splice`)** | 3.50 GB/s | **3.80 GB/s (Zero-Copy)** | **+8.6%** |
-| **In-Flight SHA-256 (`--hash`)** | Not supported (needs 2nd pass) | **Integrated (OpenSSL EVP)** | **Zero 2nd Pass** |
+| **In-Flight Checksumming (`--hash`)** | Not supported (needs 2nd pass) | **SHA-256 (EVP) & BLAKE3 (SIMD)** | **Zero 2nd Pass (3+ GB/s)** |
 | **CLI Syntax** | `if=... of=... bs=...` | `blkcp [OPTS] SRC DEST` | **Modern GNU/POSIX** |
 | **Accidental Overwrite Protection** | ❌ None (*"disk destroyer"*) | ✅ **Target Safety Guard** | **Protects `/` & Swaps** |
 | **Interactive TUI Assistant** | ❌ None | ✅ **`blkcp-tui` (ncursesw)**| **Visual Device Selector** |
@@ -109,8 +109,9 @@ blkcp -i /dev/nvme0n1 -o /dev/sdb -b 4M -e uring -p
 # 3. Instant CoW Duplicate on Btrfs/XFS/ZFS via Kernel Zero-Copy:
 blkcp -i large-vm.qcow2 -o large-vm-clone.qcow2 -e reflink -p
 
-# 4. Exact Byte Targeting with On-The-Fly SHA-256 Checksum:
+# 4. Exact Byte Targeting with On-The-Fly Checksum (SHA-256 or High-Speed BLAKE3):
 blkcp -i image.raw -o /dev/sdc -l 10G -e uring --hash -p
+blkcp -i image.raw -o /dev/sdc -l 10G -e uring --blake3 -p
 
 # 5. In-Flight Throughput Autotuning (finds optimal block size automatically):
 blkcp -i backup.iso -o /dev/sdd -b auto -p

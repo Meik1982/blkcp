@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <fcntl.h>
 #include <openssl/evp.h>
+#include <blake3.h>
 #include "system.h"
 #include "idx.h"
 #include "xtime.h"
@@ -44,8 +45,19 @@ enum dd_conversions
   C_URING       = 1 << 12,  /**< io_uring asynchronous backend */
   C_SPLICE      = 1 << 13,  /**< splice zero-copy pipe backend */
   C_NOCREAT     = 1 << 14,  /**< Do not create output file if missing */
-  C_EXCL        = 1 << 15   /**< Fail if output file already exists */
+  C_EXCL        = 1 << 15,  /**< Fail if output file already exists */
+  C_BLAKE3      = 1 << 16   /**< Parallel High-Speed BLAKE3 Tree-Hash calculation */
 };
+
+/**
+ * @brief Cryptographic hashing algorithms supported for on-the-fly verification.
+ */
+typedef enum dd_hash_algo
+{
+  HASH_ALGO_NONE = 0,       /**< No checksum calculation */
+  HASH_ALGO_SHA256,         /**< Standard NIST SHA-256 (linear streaming via OpenSSL EVP) */
+  HASH_ALGO_BLAKE3          /**< High-speed BLAKE3 tree-hash (SIMD/AVX-accelerated) */
+} dd_hash_algo_t;
 
 /**
  * @brief Execution backend engine selection for data transfer.
@@ -124,6 +136,7 @@ typedef struct dd_config
   idx_t max_bytes;                /**< Remaining bytes to copy */
   intmax_t bytes_to_copy;         /**< Exact byte count limit (-l / --limit; -1 = unbounded) */
   blkcp_engine_t engine;          /**< Explicitly chosen I/O execution backend engine */
+  dd_hash_algo_t hash_algo;       /**< Cryptographic hash algorithm (SHA256, BLAKE3) */
   int conversions_mask;           /**< Bitmask of active conversions (enum dd_conversions) */
   int input_flags;                /**< Bitmask of input flags (O_DIRECT, O_NONBLOCK, etc.) */
   int output_flags;               /**< Bitmask of output flags (O_APPEND, O_FORCE, etc.) */
@@ -194,8 +207,10 @@ typedef struct dd_context
   off_t i_nocache_pending;        /**< Un-evicted input bytes pending chunked fadvise */
   off_t o_nocache_pending;        /**< Un-evicted output bytes pending chunked fadvise */
 
-  /* On-the-fly checksumming state (Hardware-accelerated OpenSSL EVP) */
+  /* On-the-fly checksumming state (OpenSSL EVP SHA-256 and BLAKE3) */
+  dd_hash_algo_t hash_algo;       /**< Active checksum algorithm */
   EVP_MD_CTX *sha_evp_ctx;        /**< Streaming EVP SHA-256 computation state */
+  blake3_hasher b3_hasher;        /**< Streaming BLAKE3 tree-hasher state */
   unsigned char sha_digest[32];   /**< Final 256-bit binary hash digest */
   bool sha_computed;              /**< Set to true when hash computation finalized */
 

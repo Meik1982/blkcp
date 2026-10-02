@@ -463,4 +463,46 @@ $BLKCP_BIN -i "$TMP_DIR/large_in.bin" -o "$TMP_DIR/large_direct_out.bin" --direc
 cmp "$TMP_DIR/large_in.bin" "$TMP_DIR/large_direct_out.bin"
 echo "Test 40 passed: Multi-Ring Sharding Edge Cases (High concurrency -j 8/-j 16, unaligned size, tiny file, direct I/O)"
 
-echo "=== All 40 modern blkcp tests passed successfully! ==="
+# Test 41: High-Speed In-Flight BLAKE3 Checksumming (--hash=blake3, --blake3)
+dd if=/dev/urandom of="$TMP_DIR/b3_test_in.bin" bs=1048576 count=4 status=none
+
+# 41a: BLAKE3 on synchronous engine and verify exact digest format
+B3_SYNC_OUT=$($BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_sync_out.bin" -e sync --blake3 2>&1)
+B3_DIGEST=$(echo "$B3_SYNC_OUT" | grep "^blake3:" | awk '{print $2}')
+if [ -z "$B3_DIGEST" ] || [ ${#B3_DIGEST} -ne 64 ]; then
+  echo "Error: Invalid or missing BLAKE3 digest: '$B3_DIGEST'" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/b3_test_in.bin" "$TMP_DIR/b3_sync_out.bin"
+
+# 41b: Cross-engine deterministic bit-exactness (uring, async, splice must produce identical BLAKE3 digest)
+B3_URING_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_uring_out.bin" -e uring --hash=blake3 2>&1 | grep "^blake3:" | awk '{print $2}')
+B3_ASYNC_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_async_out.bin" -e async --blake3 2>&1 | grep "^blake3:" | awk '{print $2}')
+if [ "$B3_DIGEST" != "$B3_URING_DIGEST" ] || [ "$B3_DIGEST" != "$B3_ASYNC_DIGEST" ]; then
+  echo "Error: BLAKE3 digest divergence across engines: sync=$B3_DIGEST, uring=$B3_URING_DIGEST, async=$B3_ASYNC_DIGEST" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/b3_test_in.bin" "$TMP_DIR/b3_uring_out.bin"
+cmp "$TMP_DIR/b3_test_in.bin" "$TMP_DIR/b3_async_out.bin"
+
+# 41c: Multi-Ring Sharding with --blake3 (verifies graceful fallback and deterministic hash)
+B3_SHARD_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_shard_out.bin" -j 4 --blake3 2>&1 | grep "^blake3:" | awk '{print $2}')
+if [ "$B3_DIGEST" != "$B3_SHARD_DIGEST" ]; then
+  echo "Error: BLAKE3 shard digest mismatch: expected $B3_DIGEST, got $B3_SHARD_DIGEST" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/b3_test_in.bin" "$TMP_DIR/b3_shard_out.bin"
+
+# 41d: JSON telemetry schema validation with BLAKE3
+JSON_OUT=$($BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_json_out.bin" --blake3 --json 2>&1)
+echo "$JSON_OUT" | grep -q '"algorithm":"blake3"' || { echo "Error: JSON missing algorithm blake3: $JSON_OUT" >&2; exit 1; }
+echo "$JSON_OUT" | grep -q "\"digest\":\"$B3_DIGEST\"" || { echo "Error: JSON digest mismatch: $JSON_OUT" >&2; exit 1; }
+
+# 41e: Unsupported hash algorithm negative check
+if $BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_err.bin" --hash=ripemd160 2>/dev/null; then
+  echo "Error: --hash=ripemd160 should have failed but succeeded" >&2
+  exit 1
+fi
+echo "Test 41 passed: High-Speed In-Flight BLAKE3 Checksumming (--hash=blake3, --blake3, cross-engine & JSON)"
+
+echo "=== All 41 modern blkcp tests passed successfully! ==="

@@ -48,6 +48,7 @@ void dd_print_stats (const dd_context_t *ctx);
  * @param digest Raw 32-byte binary SHA-256 digest buffer.
  */
 void dd_print_hash (const unsigned char *digest);
+void dd_print_hash_algo (const unsigned char *digest, dd_hash_algo_t algo);
 
 /**
  * @brief Emit machine-readable NDJSON live progress event to standard error.
@@ -66,6 +67,7 @@ void dd_print_json_progress (const dd_stats_t *stats, intmax_t total_bytes, xtim
  * @param has_digest True if digest buffer is valid.
  */
 void dd_print_json_summary (const dd_stats_t *stats, const unsigned char *digest, bool has_digest);
+void dd_print_json_summary_ext (const dd_stats_t *stats, const unsigned char *digest, bool has_digest, dd_hash_algo_t algo);
 
 #ifdef __cplusplus
 }

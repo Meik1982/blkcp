@@ -31,8 +31,10 @@ extern void usage (int status);
 
 enum
 {
-  OPT_AUTOTUNE = 1000,
+  OPT_AUTOTUNE = 256,
   OPT_HASH,
+  OPT_SHA256,
+  OPT_BLAKE3,
   OPT_DIRECT,
   OPT_SPARSE,
   OPT_SYNC,
@@ -69,8 +71,9 @@ static struct option const modern_long_options[] =
   {"force",        no_argument,       NULL, 'f'},
   {"dry-run",      no_argument,       NULL, 'n'},
   {"autotune",     no_argument,       NULL, OPT_AUTOTUNE},
-  {"hash",         no_argument,       NULL, OPT_HASH},
-  {"sha256",       no_argument,       NULL, OPT_HASH},
+  {"hash",         optional_argument, NULL, OPT_HASH},
+  {"sha256",       no_argument,       NULL, OPT_SHA256},
+  {"blake3",       no_argument,       NULL, OPT_BLAKE3},
   {"direct",       no_argument,       NULL, OPT_DIRECT},
   {"nocache",      no_argument,       NULL, OPT_NOCACHE},
   {"sparse",       no_argument,       NULL, OPT_SPARSE},
@@ -265,7 +268,30 @@ dd_scanargs (int argc, char *const *argv, dd_config_t *cfg, bool *warn_partial_r
           cfg->conversions_mask |= C_AUTOTUNE;
           break;
         case OPT_HASH:
+          if (!optarg || !*optarg || strcmp (optarg, "sha256") == 0)
+            {
+              cfg->conversions_mask |= C_SHA256;
+              cfg->hash_algo = HASH_ALGO_SHA256;
+            }
+          else if (strcmp (optarg, "blake3") == 0 || strcmp (optarg, "b3") == 0)
+            {
+              cfg->conversions_mask |= C_BLAKE3;
+              cfg->hash_algo = HASH_ALGO_BLAKE3;
+            }
+          else
+            {
+              error (EXIT_FAILURE, 0,
+                     _("unsupported hash algorithm: %s (supported: sha256, blake3)"),
+                     quoteaf (optarg));
+            }
+          break;
+        case OPT_SHA256:
           cfg->conversions_mask |= C_SHA256;
+          cfg->hash_algo = HASH_ALGO_SHA256;
+          break;
+        case OPT_BLAKE3:
+          cfg->conversions_mask |= C_BLAKE3;
+          cfg->hash_algo = HASH_ALGO_BLAKE3;
           break;
         case OPT_DIRECT:
           cfg->input_flags |= O_DIRECT;

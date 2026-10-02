@@ -77,7 +77,8 @@ Core Options:\n\
   -q, --quiet              Suppress all output except fatal error messages\n\
   -f, --force              Override Target Safety Guard (e.g. write to mounted disks)\n\
   -n, --dry-run            Simulate transfer, inspect targets and show execution plan without writing\n\
-      --hash, --sha256     Compute on-the-fly streaming SHA-256 checksum\n\
+      --hash[=ALGO]        Compute on-the-fly checksum (sha256 [default], blake3)\n\
+      --sha256, --blake3   Direct shortcuts for SHA-256 and BLAKE3 checksums\n\
       --autotune           Enable dynamic in-flight throughput autotuning\n\
       --direct             Use direct I/O (O_DIRECT) bypassing kernel page cache\n\
       --skip=BYTES         Skip BYTES at input before copying\n\

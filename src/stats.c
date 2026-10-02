@@ -144,6 +144,12 @@ dd_print_json_progress (const dd_stats_t *stats, intmax_t total_bytes, xtime_t p
 void
 dd_print_json_summary (const dd_stats_t *stats, const unsigned char *digest, bool has_digest)
 {
+  dd_print_json_summary_ext (stats, digest, has_digest, HASH_ALGO_SHA256);
+}
+
+void
+dd_print_json_summary_ext (const dd_stats_t *stats, const unsigned char *digest, bool has_digest, dd_hash_algo_t algo)
+{
   xtime_t now = gethrxtime ();
   double delta_s = 0.0;
   double speed_bps = 0.0;
@@ -181,13 +187,22 @@ dd_print_json_summary (const dd_stats_t *stats, const unsigned char *digest, boo
       snprintf (pipeline_buf, sizeof pipeline_buf, "null");
     }
 
+  const char *algo_name = (algo == HASH_ALGO_BLAKE3) ? "blake3" : "sha256";
+  char checksum_obj[128];
+  if (has_digest && digest)
+    snprintf (checksum_obj, sizeof checksum_obj,
+              "{\"algorithm\":\"%s\",\"digest\":\"%s\"}", algo_name, hex);
+  else
+    snprintf (checksum_obj, sizeof checksum_obj, "null");
+
   fprintf (stderr,
-           "{\"event\":\"finished\",\"copied_bytes\":%jd,\"records_in\":{\"full\":%jd,\"partial\":%jd,\"truncated\":%jd},\"records_out\":{\"full\":%jd,\"partial\":%jd},\"elapsed_s\":%s,\"avg_speed_bps\":%s,\"pipeline\":%s,\"sha256\":%s%s%s}\n",
+           "{\"event\":\"finished\",\"copied_bytes\":%jd,\"records_in\":{\"full\":%jd,\"partial\":%jd,\"truncated\":%jd},\"records_out\":{\"full\":%jd,\"partial\":%jd},\"elapsed_s\":%s,\"avg_speed_bps\":%s,\"pipeline\":%s,\"checksum\":%s,\"sha256\":%s%s%s}\n",
            stats->w_bytes,
            stats->r_full, stats->r_partial, stats->r_truncate,
            stats->w_full, stats->w_partial,
            delta_s_buf, speed_buf,
            pipeline_buf,
+           checksum_obj,
            has_digest ? "\"" : "",
            has_digest ? hex : "null",
            has_digest ? "\"" : "");
@@ -243,7 +258,7 @@ dd_print_stats (const dd_context_t *ctx)
 
   if (ctx->cfg.json_output || ctx->cfg.status_level == STATUS_JSON)
     {
-      dd_print_json_summary (&ctx->stats, ctx->sha_digest, ctx->sha_computed);
+      dd_print_json_summary_ext (&ctx->stats, ctx->sha_digest, ctx->sha_computed, ctx->hash_algo);
       return;
     }
 
@@ -272,15 +287,22 @@ dd_print_stats (const dd_context_t *ctx)
     }
 
   if (ctx->sha_computed)
-    dd_print_hash (ctx->sha_digest);
+    dd_print_hash_algo (ctx->sha_digest, ctx->hash_algo);
 }
 
 void
 dd_print_hash (const unsigned char *digest)
 {
+  dd_print_hash_algo (digest, HASH_ALGO_SHA256);
+}
+
+void
+dd_print_hash_algo (const unsigned char *digest, dd_hash_algo_t algo)
+{
   char hex[65];
   for (int i = 0; i < 32; i++)
     sprintf (hex + i * 2, "%02x", digest[i]);
   hex[64] = '\0';
-  fprintf (stderr, "sha256: %s\n", hex);
+  const char *algo_name = (algo == HASH_ALGO_BLAKE3) ? "blake3" : "sha256";
+  fprintf (stderr, "%s: %s\n", algo_name, hex);
 }

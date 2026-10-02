@@ -498,6 +498,8 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
 
   if ((ctx->cfg.conversions_mask & C_SHA256) && size > 0 && ctx->sha_evp_ctx)
     EVP_DigestUpdate (ctx->sha_evp_ctx, buf, (size_t) size);
+  if ((ctx->cfg.conversions_mask & C_BLAKE3) && size > 0)
+    blake3_hasher_update (&((dd_context_t *) ctx)->b3_hasher, buf, (size_t) size);
 
   if ((ctx->cfg.conversions_mask & C_SPARSE) && is_nul (buf, size))
     {
@@ -637,7 +639,7 @@ dd_select_io_driver (dd_context_t *ctx)
 
 #if defined __linux__
   /* 5. Opportunistic zero-copy reflink via copy_file_range when engine == ENGINE_AUTO */
-  const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_SPARSE | C_AUTOTUNE;
+  const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_BLAKE3 | C_SPARSE | C_AUTOTUNE;
   if (!(ctx->cfg.conversions_mask & incompatible)
       && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
       && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
@@ -778,11 +780,18 @@ dd_copy (dd_context_t *ctx)
   if (ctx->cfg.max_records == 0 && ctx->cfg.max_bytes == 0)
     return exit_status;
 
+  ctx->hash_algo = ctx->cfg.hash_algo;
   if (ctx->cfg.conversions_mask & C_SHA256)
     {
+      ctx->hash_algo = HASH_ALGO_SHA256;
       ctx->sha_evp_ctx = EVP_MD_CTX_new ();
       if (ctx->sha_evp_ctx)
         EVP_DigestInit_ex (ctx->sha_evp_ctx, EVP_sha256 (), NULL);
+    }
+  else if (ctx->cfg.conversions_mask & C_BLAKE3)
+    {
+      ctx->hash_algo = HASH_ALGO_BLAKE3;
+      blake3_hasher_init (&ctx->b3_hasher);
     }
 
   /* Select and initialize backend driver */
@@ -865,7 +874,7 @@ dd_copy (dd_context_t *ctx)
       ctx->final_op_was_seek = false;
     }
 
-  /* Finalize SHA-256 digest if active */
+  /* Finalize checksum digest if active */
   if (ctx->cfg.conversions_mask & C_SHA256)
     {
       if (ctx->sha_evp_ctx)
@@ -875,6 +884,11 @@ dd_copy (dd_context_t *ctx)
           EVP_MD_CTX_free (ctx->sha_evp_ctx);
           ctx->sha_evp_ctx = NULL;
         }
+      ctx->sha_computed = true;
+    }
+  else if (ctx->cfg.conversions_mask & C_BLAKE3)
+    {
+      blake3_hasher_finalize (&ctx->b3_hasher, ctx->sha_digest, 32);
       ctx->sha_computed = true;
     }
 
@@ -1213,7 +1227,7 @@ dd_execute_dry_run (dd_context_t *ctx)
   else /* ENGINE_AUTO */
     {
 #if defined __linux__
-      const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_SPARSE | C_AUTOTUNE;
+      const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_BLAKE3 | C_SPARSE | C_AUTOTUNE;
       bool can_reflink = !(ctx->cfg.conversions_mask & incompatible)
                          && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
                          && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
@@ -1281,7 +1295,7 @@ dd_execute_dry_run (dd_context_t *ctx)
               engine_name, (size_t) effective_bs, autotune ? "true" : "false",
               (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT) ? "true" : "false",
               ctx->cfg.i_nocache || ctx->cfg.o_nocache ? "true" : "false",
-              ctx->cfg.conversions_mask & C_SHA256 ? "true" : "false",
+              (ctx->cfg.conversions_mask & (C_SHA256 | C_BLAKE3)) ? "true" : "false",
               (intmax_t) ctx->cfg.bytes_to_copy,
               (size_t) (ctx->cfg.skip_records * effective_bs + ctx->cfg.skip_bytes),
               (size_t) (ctx->cfg.seek_records * effective_bs + ctx->cfg.seek_bytes));
@@ -1315,8 +1329,12 @@ dd_execute_dry_run (dd_context_t *ctx)
               (ctx->cfg.input_flags & O_DIRECT) || (ctx->cfg.output_flags & O_DIRECT) ? _("enabled (O_DIRECT)") : _("disabled"));
       printf (_("Cache Policy: %s\n"),
               ctx->cfg.i_nocache || ctx->cfg.o_nocache ? _("nocache (chunked eviction)") : _("kernel page cache"));
-      printf (_("Checksum:     %s\n"),
-              ctx->cfg.conversions_mask & C_SHA256 ? _("SHA-256 (in-flight)") : _("disabled"));
+      const char *hash_desc = _("disabled");
+      if (ctx->cfg.conversions_mask & C_SHA256)
+        hash_desc = _("SHA-256 (in-flight)");
+      else if (ctx->cfg.conversions_mask & C_BLAKE3)
+        hash_desc = _("BLAKE3 (in-flight)");
+      printf (_("Checksum:     %s\n"), hash_desc);
 
       if (ctx->cfg.bytes_to_copy >= 0)
         printf (_("Byte Limit:   %jd bytes\n"), (intmax_t) ctx->cfg.bytes_to_copy);

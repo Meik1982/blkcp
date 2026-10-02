@@ -56,7 +56,7 @@ src/
 * `--json`: Maschinenlesbare NDJSON-Telemetrie auf `stderr` für CI/CD und Automatisierung
 * `-q, --quiet`: Stiller Modus (nur fatale Fehlermeldungen)
 * `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
-* `--hash`, `--sha256`: Berechnet on-the-fly die Streaming-SHA-256-Prüfsumme
+* `--hash[=ALGO]`, `--sha256`, `--blake3`: Berechnet on-the-fly Streaming-Prüfsummen (`sha256` oder high-speed `blake3` mit 3+ GB/s)
 * `--autotune`: Dynamisches Durchsatz-Autotuning
 * `--queue-depth <N>`: Ringpuffer-Slotanzahl für die `async`-Engine (Standard: adaptive dynamische Skalierung)
 * `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
@@ -108,8 +108,10 @@ blkcp: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mount
 Use '-f' or '--force' to override if intentional.
 ```
 
-### 5. On-the-Fly Streaming SHA-256 Checksumme (`--hash` / `--sha256`)
-Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
+### 5. On-the-Fly Streaming Checksummen (`--hash`, `--sha256`, `--blake3`)
+Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf:
+* **`--hash=sha256` (Standard):** FIPS-konform, bitgenau kompatibel mit `sha256sum`.
+* **`--hash=blake3` / `--blake3`:** SIMD-beschleunigter Merkle-Tree-Hash via `libblake3` mit über 3 GB/s Durchsatz für High-End NVMe-Transfers zur Erkennung von Silent Data Corruption, 100 % kompatibel mit `b3sum`. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
 
 ### 6. Gefahrloser Simulationsmodus (`--dry-run` / `-n`)
 Prüft Quell- und Zielparameter, evaluiert den Target Safety Guard und gibt den exakten Ausführungsplan aus (optional als maschinenlesbares NDJSON via `--json`), ohne Daten zu schreiben oder Zielmedien zu verändern. Perfekt für System-Skripte und KI-Agenten:

@@ -62,6 +62,8 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   Paralleles Sharding mehrerer Submission-/Completion-Rings über dedizierte CPU-Worker (`pthread`) für High-End Multi-Queue NVMe-Controller und parallele Flash-Arrays. Dynamisches Work-Stealing über 64-MiB-Chunks via atomaren Offset (`atomic_uint_fast64_t`). Vollwertige Fallback-Absicherung auf Single-Ring bei Streaming-Prüfsummen (`--hash` / SHA-256) und nicht-seekable Streams (Pipes/FIFOs/Sockets). In Regressionstests 39 & 40 verifiziert.
 - [x] **High-Speed In-Flight BLAKE3 Checksumming (`--hash=blake3`, `--blake3`):**
   Hardwarenahe Prüfsummenberechnung via `libblake3` (SIMD/AVX2/AVX-512) direkt im Speicher während des I/O-Transfers für alle Treiber (`sync`, `async`, `uring`, `splice`, `reflink`). Ermöglicht 3+ GB/s Streaming-Integritätsprüfung zur Erkennung von Silent Data Corruption und Bit-Flips, 1:1 bitgenau kompatibel zu `b3sum`. Inklusive vollständiger NDJSON-Telemetrie (`--json`), CLI-Shortcuts und Regressionstest 41.
+- [x] **High-Speed In-Flight BLKS-384 Post-Quantum Tree-Hash Checksumming (`--hash=blks`, `--blks`):**
+  Direkte C-FFI-Integration der `blks`-Bibliothek (`include/blks.h` und statisches `libblks_core.a`). Berechnet 384-Bit-Prüfsummen in sauberen 64-Zeichen Base64 ohne Padding mit 192 Bit Post-Quantum-Kollisionsresistenz in-flight während des Transfers für alle Treiber (`sync`, `async`, `uring`). Inklusive vollständiger NDJSON-Telemetrie (`--json`), CLI-Shortcuts, Shell-Completions (Bash/Zsh/Fish), Manpage-Aktualisierung und Regressionstest 42 (42/42 Tests grün, ASan/UBSan-verifiziert).
 
 ---
 

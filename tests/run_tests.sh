@@ -505,4 +505,51 @@ if $BLKCP_BIN -i "$TMP_DIR/b3_test_in.bin" -o "$TMP_DIR/b3_err.bin" --hash=ripem
 fi
 echo "Test 41 passed: High-Speed In-Flight BLAKE3 Checksumming (--hash=blake3, --blake3, cross-engine & JSON)"
 
-echo "=== All 41 modern blkcp tests passed successfully! ==="
+# Test 42: High-Speed In-Flight BLKS-384 Post-Quantum Tree-Hash Checksumming (--hash=blks, --blks)
+dd if=/dev/urandom of="$TMP_DIR/blks_test_in.bin" bs=1048576 count=4 status=none
+
+# 42a: BLKS on synchronous engine and verify exact 64-character Base64 format
+BLKS_SYNC_OUT=$($BLKCP_BIN -i "$TMP_DIR/blks_test_in.bin" -o "$TMP_DIR/blks_sync_out.bin" -e sync --blks 2>&1)
+BLKS_DIGEST=$(echo "$BLKS_SYNC_OUT" | grep "^blks:" | awk '{print $2}')
+if [ -z "$BLKS_DIGEST" ] || [ ${#BLKS_DIGEST} -ne 64 ]; then
+  echo "Error: Invalid or missing BLKS digest: '$BLKS_DIGEST'" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/blks_test_in.bin" "$TMP_DIR/blks_sync_out.bin"
+
+# 42b: Cross-engine deterministic bit-exactness (uring, async must produce identical BLKS digest)
+BLKS_URING_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/blks_test_in.bin" -o "$TMP_DIR/blks_uring_out.bin" -e uring --hash=blks 2>&1 | grep "^blks:" | awk '{print $2}')
+BLKS_ASYNC_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/blks_test_in.bin" -o "$TMP_DIR/blks_async_out.bin" -e async --blks 2>&1 | grep "^blks:" | awk '{print $2}')
+if [ "$BLKS_DIGEST" != "$BLKS_URING_DIGEST" ] || [ "$BLKS_DIGEST" != "$BLKS_ASYNC_DIGEST" ]; then
+  echo "Error: BLKS digest divergence across engines: sync=$BLKS_DIGEST, uring=$BLKS_URING_DIGEST, async=$BLKS_ASYNC_DIGEST" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/blks_test_in.bin" "$TMP_DIR/blks_uring_out.bin"
+cmp "$TMP_DIR/blks_test_in.bin" "$TMP_DIR/blks_async_out.bin"
+
+# 42c: Multi-Ring Sharding with --blks (verifies deterministic hash)
+BLKS_SHARD_DIGEST=$($BLKCP_BIN -i "$TMP_DIR/blks_test_in.bin" -o "$TMP_DIR/blks_shard_out.bin" -j 4 --blks 2>&1 | grep "^blks:" | awk '{print $2}')
+if [ "$BLKS_DIGEST" != "$BLKS_SHARD_DIGEST" ]; then
+  echo "Error: BLKS shard digest mismatch: expected $BLKS_DIGEST, got $BLKS_SHARD_DIGEST" >&2
+  exit 1
+fi
+cmp "$TMP_DIR/blks_test_in.bin" "$TMP_DIR/blks_shard_out.bin"
+
+# 42d: Compare with standalone blks CLI tool if available
+BLKS_CLI="/home/meik/workspace/blks/target/release/blks"
+if [ -x "$BLKS_CLI" ]; then
+  STANDALONE_DIGEST=$($BLKS_CLI "$TMP_DIR/blks_test_in.bin" | awk '{print $1}')
+  if [ "$BLKS_DIGEST" != "$STANDALONE_DIGEST" ]; then
+    echo "Error: blkcp digest ($BLKS_DIGEST) differs from standalone blks ($STANDALONE_DIGEST)" >&2
+    exit 1
+  fi
+fi
+
+# 42e: JSON telemetry schema validation with BLKS
+JSON_OUT=$($BLKCP_BIN -i "$TMP_DIR/blks_test_in.bin" -o "$TMP_DIR/blks_json_out.bin" --blks --json 2>&1)
+echo "$JSON_OUT" | grep -q '"algorithm":"blks"' || { echo "Error: JSON missing algorithm blks: $JSON_OUT" >&2; exit 1; }
+echo "$JSON_OUT" | grep -q "\"digest\":\"$BLKS_DIGEST\"" || { echo "Error: JSON digest mismatch: $JSON_OUT" >&2; exit 1; }
+
+echo "Test 42 passed: High-Speed In-Flight BLKS-384 Checksumming (--hash=blks, --blks, cross-engine & JSON)"
+
+echo "=== All 42 modern blkcp tests passed successfully! ==="

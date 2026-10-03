@@ -500,6 +500,10 @@ dd_iwrite (dd_context_t *ctx, int fd, char const *buf, idx_t size)
     EVP_DigestUpdate (ctx->sha_evp_ctx, buf, (size_t) size);
   if ((ctx->cfg.conversions_mask & C_BLAKE3) && size > 0)
     blake3_hasher_update (&((dd_context_t *) ctx)->b3_hasher, buf, (size_t) size);
+#ifdef HAVE_BLKS
+  if ((ctx->cfg.conversions_mask & C_BLKS) && size > 0 && ctx->blks_hasher)
+    blks_hasher_update (ctx->blks_hasher, (const uint8_t *) buf, (size_t) size);
+#endif
 
   if ((ctx->cfg.conversions_mask & C_SPARSE) && is_nul (buf, size))
     {
@@ -639,7 +643,7 @@ dd_select_io_driver (dd_context_t *ctx)
 
 #if defined __linux__
   /* 5. Opportunistic zero-copy reflink via copy_file_range when engine == ENGINE_AUTO */
-  const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_BLAKE3 | C_SPARSE | C_AUTOTUNE;
+  const int incompatible = C_SWAB | C_SYNC | C_SHA256 | C_BLAKE3 | C_BLKS | C_SPARSE | C_AUTOTUNE;
   if (!(ctx->cfg.conversions_mask & incompatible)
       && !ctx->iread_fnc && !ctx->cfg.i_nocache && !ctx->cfg.o_nocache
       && !(ctx->cfg.input_flags & (O_DIRECT | O_NOCACHE))
@@ -793,6 +797,13 @@ dd_copy (dd_context_t *ctx)
       ctx->hash_algo = HASH_ALGO_BLAKE3;
       blake3_hasher_init (&ctx->b3_hasher);
     }
+#ifdef HAVE_BLKS
+  else if (ctx->cfg.conversions_mask & C_BLKS)
+    {
+      ctx->hash_algo = HASH_ALGO_BLKS;
+      ctx->blks_hasher = blks_hasher_new ();
+    }
+#endif
 
   /* Select and initialize backend driver */
   const dd_io_driver_t *driver = dd_select_io_driver (ctx);
@@ -891,6 +902,18 @@ dd_copy (dd_context_t *ctx)
       blake3_hasher_finalize (&ctx->b3_hasher, ctx->sha_digest, 32);
       ctx->sha_computed = true;
     }
+#ifdef HAVE_BLKS
+  else if (ctx->cfg.conversions_mask & C_BLKS)
+    {
+      if (ctx->blks_hasher)
+        {
+          blks_hasher_finalize (ctx->blks_hasher, ctx->sha_digest);
+          ctx->blks_hasher = NULL;
+          blks_digest_to_base64 (ctx->sha_digest, ctx->blks_b64, sizeof (ctx->blks_b64));
+        }
+      ctx->sha_computed = true;
+    }
+#endif
 
   return exit_status;
 }
@@ -1334,6 +1357,10 @@ dd_execute_dry_run (dd_context_t *ctx)
         hash_desc = _("SHA-256 (in-flight)");
       else if (ctx->cfg.conversions_mask & C_BLAKE3)
         hash_desc = _("BLAKE3 (in-flight)");
+#ifdef HAVE_BLKS
+      else if (ctx->cfg.conversions_mask & C_BLKS)
+        hash_desc = _("BLKS-384 (in-flight, 192-bit quantum safe)");
+#endif
       printf (_("Checksum:     %s\n"), hash_desc);
 
       if (ctx->cfg.bytes_to_copy >= 0)

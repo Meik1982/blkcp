@@ -65,10 +65,10 @@ Override the Target Safety Guard when attempting to write to devices hosting mou
 Simulate execution, inspect source/target parameters, evaluate the Target Safety Guard, and print the detailed execution plan (or JSON when paired with \fB\-\-json\fR) without transferring or modifying any data.
 .TP
 \fB\-\-hash\fR[\fB=\fR\fIALGO\/\fR]
-Compute on-the-fly streaming cryptographic checksum without requiring an extra I/O pass. \fIALGO\fR can be \fBsha256\fR (default, linear FIPS) or \fBblake3\fR (SIMD-accelerated high-speed tree-hash).
+Compute on-the-fly streaming cryptographic checksum without requiring an extra I/O pass. \fIALGO\fR can be \fBsha256\fR (default, linear FIPS), \fBblake3\fR (SIMD-accelerated high-speed tree-hash), or \fBblks\fR (384-bit post-quantum tree-hash in 64-character clean Base64 with 192-bit collision resistance).
 .TP
-\fB\-\-sha256\fR, \fB\-\-blake3\fR
-Direct shortcuts for SHA-256 and high-speed BLAKE3 in-flight checksumming.
+\fB\-\-sha256\fR, \fB\-\-blake3\fR, \fB\-\-blks\fR
+Direct shortcuts for SHA-256, high-speed BLAKE3, and 384-bit BLKS in-flight checksumming.
 .TP
 \fB\-\-autotune\fR
 Benchmark and dynamically scale the block size during the initial transfer phase for peak bus throughput.

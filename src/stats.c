@@ -166,14 +166,24 @@ dd_print_json_summary_ext (const dd_stats_t *stats, const unsigned char *digest,
   char speed_buf[32];
   format_json_double (delta_s_buf, sizeof delta_s_buf, delta_s, 4);
   format_json_double (speed_buf, sizeof speed_buf, speed_bps, 0);
-
-  char hex[65];
+  char hex[97];
   if (has_digest && digest)
     {
-      for (int i = 0; i < 32; i++)
-        sprintf (hex + i * 2, "%02x", digest[i]);
-      hex[64] = '\0';
+#ifdef HAVE_BLKS
+      if (algo == HASH_ALGO_BLKS)
+        {
+          blks_digest_to_base64 (digest, hex, sizeof (hex));
+        }
+      else
+#endif
+        {
+          for (int i = 0; i < 32; i++)
+            sprintf (hex + i * 2, "%02x", digest[i]);
+          hex[64] = '\0';
+        }
     }
+  else
+    hex[0] = '\0';
 
   char pipeline_buf[128];
   if (stats->async_capacity > 0)
@@ -187,7 +197,13 @@ dd_print_json_summary_ext (const dd_stats_t *stats, const unsigned char *digest,
       snprintf (pipeline_buf, sizeof pipeline_buf, "null");
     }
 
-  const char *algo_name = (algo == HASH_ALGO_BLAKE3) ? "blake3" : "sha256";
+  const char *algo_name = "sha256";
+  if (algo == HASH_ALGO_BLAKE3)
+    algo_name = "blake3";
+#ifdef HAVE_BLKS
+  else if (algo == HASH_ALGO_BLKS)
+    algo_name = "blks";
+#endif
   char checksum_obj[128];
   if (has_digest && digest)
     snprintf (checksum_obj, sizeof checksum_obj,
@@ -299,6 +315,15 @@ dd_print_hash (const unsigned char *digest)
 void
 dd_print_hash_algo (const unsigned char *digest, dd_hash_algo_t algo)
 {
+#ifdef HAVE_BLKS
+  if (algo == HASH_ALGO_BLKS)
+    {
+      char b64[65];
+      blks_digest_to_base64 (digest, b64, sizeof (b64));
+      fprintf (stderr, "blks:   %s\n", b64);
+      return;
+    }
+#endif
   char hex[65];
   for (int i = 0; i < 32; i++)
     sprintf (hex + i * 2, "%02x", digest[i]);

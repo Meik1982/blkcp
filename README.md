@@ -109,9 +109,10 @@ blkcp -i /dev/nvme0n1 -o /dev/sdb -b 4M -e uring -p
 # 3. Instant CoW Duplicate on Btrfs/XFS/ZFS via Kernel Zero-Copy:
 blkcp -i large-vm.qcow2 -o large-vm-clone.qcow2 -e reflink -p
 
-# 4. Exact Byte Targeting with On-The-Fly Checksum (SHA-256 or High-Speed BLAKE3):
+# 4. Exact Byte Targeting with On-The-Fly Checksum (SHA-256, BLAKE3, or Post-Quantum BLKS-384):
 blkcp -i image.raw -o /dev/sdc -l 10G -e uring --hash -p
 blkcp -i image.raw -o /dev/sdc -l 10G -e uring --blake3 -p
+blkcp -i image.raw -o /dev/sdc -l 10G -e uring --blks -p
 
 # 5. In-Flight Throughput Autotuning (finds optimal block size automatically):
 blkcp -i backup.iso -o /dev/sdd -b auto -p

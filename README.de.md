@@ -56,7 +56,7 @@ src/
 * `--json`: Maschinenlesbare NDJSON-Telemetrie auf `stderr` für CI/CD und Automatisierung
 * `-q, --quiet`: Stiller Modus (nur fatale Fehlermeldungen)
 * `-f, --force`: Schutzsperre gegen Überschreiben gemounteter Partitionen übersteuern
-* `--hash[=ALGO]`, `--sha256`, `--blake3`: Berechnet on-the-fly Streaming-Prüfsummen (`sha256` oder high-speed `blake3` mit 3+ GB/s)
+* `--hash[=ALGO]`, `--sha256`, `--blake3`, `--blks`: Berechnet on-the-fly Streaming-Prüfsummen (`sha256`, `blake3` oder 384-Bit Post-Quantum `blks` in 64-Zeichen Base64)
 * `--autotune`: Dynamisches Durchsatz-Autotuning
 * `--queue-depth <N>`: Ringpuffer-Slotanzahl für die `async`-Engine (Standard: adaptive dynamische Skalierung)
 * `--direct`: Direct I/O (`O_DIRECT`) unter Umgehung des OS Page-Caches
@@ -108,10 +108,11 @@ blkcp: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mount
 Use '-f' or '--force' to override if intentional.
 ```
 
-### 5. On-the-Fly Streaming Checksummen (`--hash`, `--sha256`, `--blake3`)
+### 5. On-the-Fly Streaming Checksummen (`--hash`, `--sha256`, `--blake3`, `--blks`)
 Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf:
 * **`--hash=sha256` (Standard):** FIPS-konform, bitgenau kompatibel mit `sha256sum`.
-* **`--hash=blake3` / `--blake3`:** SIMD-beschleunigter Merkle-Tree-Hash via `libblake3` mit über 3 GB/s Durchsatz für High-End NVMe-Transfers zur Erkennung von Silent Data Corruption, 100 % kompatibel mit `b3sum`. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
+* **`--hash=blake3` / `--blake3`:** SIMD-beschleunigter Merkle-Tree-Hash via `libblake3` mit über 3 GB/s Durchsatz für High-End NVMe-Transfers zur Erkennung von Silent Data Corruption, 100 % kompatibel mit `b3sum`.
+* **`--hash=blks` / `--blks`:** 384-Bit Post-Quantum Merkle-Tree-Hash via `blks` mit **192 Bit Kollisionssicherheit** in sauberen 64 Zeichen Base64 ohne Padding. Identische Zeilenbreite wie SHA-256, aber astronomisch höhere Krypto-Sicherheit bei Durchsätzen von über 5 GB/s. Beseitigt die Notwendigkeit eines zeitraubenden zweiten Verifikationsdurchgangs.
 
 ### 6. Gefahrloser Simulationsmodus (`--dry-run` / `-n`)
 Prüft Quell- und Zielparameter, evaluiert den Target Safety Guard und gibt den exakten Ausführungsplan aus (optional als maschinenlesbares NDJSON via `--json`), ohne Daten zu schreiben oder Zielmedien zu verändern. Perfekt für System-Skripte und KI-Agenten:

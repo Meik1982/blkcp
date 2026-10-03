@@ -3,6 +3,19 @@ CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
 LDFLAGS ?= 
 LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring -lblake3
 
+# BLKS 384-Bit Post-Quantum Tree-Hash Library
+BLKS_DIR ?= $(abspath ../blks)
+ifneq ($(wildcard $(BLKS_DIR)/include/blks.h),)
+  override CFLAGS += -I$(BLKS_DIR)/include -DHAVE_BLKS=1
+  override LIBS += $(BLKS_DIR)/target/release/libblks_core.a -lm -ldl
+else ifneq ($(wildcard /usr/include/blks.h),)
+  override CFLAGS += -DHAVE_BLKS=1
+  override LIBS += -lblks_core -lm -ldl
+else ifneq ($(wildcard /usr/local/include/blks.h),)
+  override CFLAGS += -I/usr/local/include -DHAVE_BLKS=1
+  override LIBS += -L/usr/local/lib -lblks_core -lm -ldl
+endif
+
 TARGET = blkcp
 TARGET_TUI = blkcp-tui
 

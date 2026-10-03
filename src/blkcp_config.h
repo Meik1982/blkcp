@@ -9,6 +9,9 @@
 #include <fcntl.h>
 #include <openssl/evp.h>
 #include <blake3.h>
+#ifdef HAVE_BLKS
+#include <blks.h>
+#endif
 #include "system.h"
 #include "idx.h"
 #include "xtime.h"
@@ -46,7 +49,8 @@ enum dd_conversions
   C_SPLICE      = 1 << 13,  /**< splice zero-copy pipe backend */
   C_NOCREAT     = 1 << 14,  /**< Do not create output file if missing */
   C_EXCL        = 1 << 15,  /**< Fail if output file already exists */
-  C_BLAKE3      = 1 << 16   /**< Parallel High-Speed BLAKE3 Tree-Hash calculation */
+  C_BLAKE3      = 1 << 16,  /**< Parallel High-Speed BLAKE3 Tree-Hash calculation */
+  C_BLKS        = 1 << 17   /**< 384-Bit Post-Quantum BLKS Tree-Hash (192-bit collision resistance) */
 };
 
 /**
@@ -56,7 +60,8 @@ typedef enum dd_hash_algo
 {
   HASH_ALGO_NONE = 0,       /**< No checksum calculation */
   HASH_ALGO_SHA256,         /**< Standard NIST SHA-256 (linear streaming via OpenSSL EVP) */
-  HASH_ALGO_BLAKE3          /**< High-speed BLAKE3 tree-hash (SIMD/AVX-accelerated) */
+  HASH_ALGO_BLAKE3,         /**< High-speed BLAKE3 tree-hash (SIMD/AVX-accelerated) */
+  HASH_ALGO_BLKS            /**< 384-Bit BLKS Post-Quantum Tree-Hash (64-char Base64, 192-bit collision resistance) */
 } dd_hash_algo_t;
 
 /**
@@ -207,11 +212,15 @@ typedef struct dd_context
   off_t i_nocache_pending;        /**< Un-evicted input bytes pending chunked fadvise */
   off_t o_nocache_pending;        /**< Un-evicted output bytes pending chunked fadvise */
 
-  /* On-the-fly checksumming state (OpenSSL EVP SHA-256 and BLAKE3) */
+  /* On-the-fly checksumming state (OpenSSL EVP SHA-256, BLAKE3 and BLKS-384) */
   dd_hash_algo_t hash_algo;       /**< Active checksum algorithm */
   EVP_MD_CTX *sha_evp_ctx;        /**< Streaming EVP SHA-256 computation state */
   blake3_hasher b3_hasher;        /**< Streaming BLAKE3 tree-hasher state */
-  unsigned char sha_digest[32];   /**< Final 256-bit binary hash digest */
+#ifdef HAVE_BLKS
+  blks_hasher_t *blks_hasher;     /**< Streaming BLKS-384 tree-hasher state */
+  char blks_b64[65];              /**< 64-char Base64 digest string (+ null terminator) */
+#endif
+  unsigned char sha_digest[48];   /**< Final binary hash digest (32 bytes SHA256/B3, 48 bytes BLKS) */
   bool sha_computed;              /**< Set to true when hash computation finalized */
 
   /* Estimated or measured total input size for progress/ETA */

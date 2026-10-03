@@ -1,7 +1,7 @@
 Source: blkcp
 Section: utils
 Priority: optional
-Maintainer: Meik <meik@github.com>
+Maintainer: Meik Augenblick <meik@github.com>
 Build-Depends: debhelper-compat (= 13),
                gcc,
                make,

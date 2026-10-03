@@ -28,7 +28,7 @@
 #include "io_engine.h"
 
 #define PROGRAM_NAME "blkcp"
-#define AUTHORS proper_name ("Meik")
+#define AUTHORS proper_name ("Meik Augenblick")
 
 static bool close_stdout_required = true;
 

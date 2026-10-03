@@ -4,10 +4,10 @@ blkcp (1.0.1-1) unstable; urgency=medium
   * Add Fish shell completions and Makefile vendor integration.
   * Fix RPM packaging spec and bump version.
 
- -- Meik <meik@github.com>  Tue, 22 Sep 2026 18:15:00 +0200
+ -- Meik Augenblick <meik@github.com>  Tue, 22 Sep 2026 18:15:00 +0200
 
 blkcp (1.0.0-1) unstable; urgency=medium
 
   * Initial release of blkcp v1.0.0.
 
- -- Meik <meik@github.com>  Mon, 21 Sep 2026 18:15:00 +0200
+ -- Meik Augenblick <meik@github.com>  Mon, 21 Sep 2026 18:15:00 +0200

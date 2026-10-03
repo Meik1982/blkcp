@@ -11,7 +11,7 @@ Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch ent
   * Offizielles GNU-Repository: <https://git.savannah.gnu.org/git/coreutils.git>
   * GitHub-Mirror: <https://github.com/coreutils/coreutils>
 * **Originalautoren:** Paul Rubin, David MacKenzie, Stuart Kemp und die Free Software Foundation, Inc.
-* **Weiterentwicklung & Architektur:** Meik (2026).
+* **Weiterentwicklung & Architektur:** Meik Augenblick (2026).
 * **Lizenz:** GNU General Public License v3 oder neuer (GPLv3+). Siehe <https://gnu.org/licenses/gpl.html>.
 
 ---

@@ -200,6 +200,6 @@ make test
 
 `blkcp` originated as an ambitious architectural overhaul, modernization, and modularization of GNU `dd` (GNU Coreutils 9.5).
 
-* **Project Lead & Architecture:** Meik ([@Meik1982](https://github.com/Meik1982))
+* **Project Lead & Architecture:** Meik Augenblick ([@Meik1982](https://github.com/Meik1982))
 * **Coreutils Heritage:** Paul Rubin, David MacKenzie, Stuart Kemp, Jim Meyering, Pádraig Brady, and GNU contributors.
 * **License:** GNU General Public License v3 or later ([GPL-3.0-or-later](LICENSE)).

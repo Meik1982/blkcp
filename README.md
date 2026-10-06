@@ -43,6 +43,10 @@ blkcp: SAFETY GUARD: refusing to overwrite '/dev/zram0' which is an active syste
 Use '-f' or '--force' to override if intentional.
 ```
 
+### 🤖 Native AI Agent Guardrails (HOL Guard)
+
+In addition to its internal runtime checks, `blkcp` is officially supported with native command protection in [HOL Guard](https://github.com/hashgraph-online/hol-guard) via the built-in `command.blkcp` extension. Autonomous AI coding agents operating under HOL Guard are proactively intercepted for human review when attempting destructive raw `/dev/*` device writes or `--force` / `-f` overrides, preventing accidental block destruction in agentic workflows out of the box.
+
 ---
 
 ## 🚀 Installation & Quick Start

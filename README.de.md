@@ -108,6 +108,9 @@ blkcp: SAFETY GUARD: refusing to overwrite '/dev/nvme0n1p2' which contains mount
 Use '-f' or '--force' to override if intentional.
 ```
 
+#### Nativer Schutz für autonome KI-Agenten (HOL Guard)
+Ergänzend zu den internen Laufzeitprüfungen wird `blkcp` ab Werk offiziell durch [HOL Guard](https://github.com/hashgraph-online/hol-guard) (`command.blkcp`) geschützt. Autonome KI-Entwicklungsagenten (z. B. Claude Code, Codex, Hermes), die in durch HOL Guard abgesicherten Umgebungen agieren, werden bei potenziell destruktiven `blkcp`-Befehlen (wie direkten Schreibzugriffen auf `/dev/*`-Blockgeräte oder erzwungener `--force` / `-f`-Ausführung) vorab zur menschlichen Bestätigung angehalten.
+
 ### 5. On-the-Fly Streaming Checksummen (`--hash`, `--sha256`, `--blake3`, `--blks`)
 Berechnet die kryptografische Prüfsumme direkt parallel zum Datentransfer im selben Durchlauf:
 * **`--hash=sha256` (Standard):** FIPS-konform, bitgenau kompatibel mit `sha256sum`.

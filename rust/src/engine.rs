@@ -7,6 +7,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::aligned::AlignedBuffer;
 use crate::args::{Config, Engine, HashAlgo};
 use crate::hash::InFlightHasher;
 use crate::stats::Stats;
@@ -28,6 +29,18 @@ fn install_signal_handler(stats: Arc<Stats>) {
 
 #[cfg(not(unix))]
 fn install_signal_handler(_stats: Arc<Stats>) {}
+
+#[cfg(target_os = "linux")]
+fn evict_page_cache(file: &File) {
+    // SAFETY: `file.as_raw_fd()` is a valid open file descriptor. Passing offset=0, len=0
+    // with `POSIX_FADV_DONTNEED` instructs the Linux kernel to drop cached pages for this file.
+    unsafe {
+        let _ = libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn evict_page_cache(_file: &File) {}
 
 fn is_regular_file_or_new(path: &Path) -> bool {
     if let Ok(metadata) = std::fs::metadata(path) {
@@ -129,10 +142,11 @@ fn try_reflink_copy(
         return Ok(false);
     }
 
-    let chunk_size = (64 * 1024 * 1024).max(cfg.block_size); // 64 MiB
+    let bs = cfg.block_size.max(1);
+    let chunk_size = (64 * 1024 * 1024).max(bs); // 64 MiB
     let mut remaining = cfg.limit_bytes;
     if let Some(cnt) = cfg.count {
-        let total_from_count = cnt.saturating_mul(cfg.block_size as u64);
+        let total_from_count = cnt.saturating_mul(bs as u64);
         remaining = Some(remaining.map_or(total_from_count, |r| r.min(total_from_count)));
     }
 
@@ -171,14 +185,14 @@ fn try_reflink_copy(
             stats.add_bytes(n as u64);
             stats
                 .records_in_full
-                .fetch_add((n / cfg.block_size) as u64, Ordering::Relaxed);
-            if !n.is_multiple_of(cfg.block_size) {
+                .fetch_add((n / bs) as u64, Ordering::Relaxed);
+            if !n.is_multiple_of(bs) {
                 stats.inc_in_part();
             }
             stats
                 .records_out_full
-                .fetch_add((n / cfg.block_size) as u64, Ordering::Relaxed);
-            if !n.is_multiple_of(cfg.block_size) {
+                .fetch_add((n / bs) as u64, Ordering::Relaxed);
+            if !n.is_multiple_of(bs) {
                 stats.inc_out_part();
             }
             if let Some(ref mut rem) = remaining {
@@ -220,6 +234,121 @@ fn try_reflink_copy(
     _cancel_flag: &AtomicBool,
 ) -> Result<bool> {
     Ok(false) // Portable fallback
+}
+
+#[cfg(target_os = "linux")]
+fn try_splice_copy(
+    in_fd: std::os::unix::io::RawFd,
+    out_fd: std::os::unix::io::RawFd,
+    cfg: &Config,
+    stats: &Stats,
+    cancel_flag: &AtomicBool,
+) -> Result<bool> {
+    let (pipe_r, pipe_w) = match nix::unistd::pipe() {
+        Ok(p) => p,
+        Err(_) => return Ok(false),
+    };
+    let pipe_r_fd = pipe_r.as_raw_fd();
+    let pipe_w_fd = pipe_w.as_raw_fd();
+
+    let bs = cfg.block_size.max(1);
+    let chunk_size = bs.clamp(4096, 1024 * 1024);
+    let mut remaining = cfg.limit_bytes;
+    if let Some(cnt) = cfg.count {
+        let total = cnt.saturating_mul(bs as u64);
+        remaining = Some(remaining.map_or(total, |r| r.min(total)));
+    }
+
+    let flags = libc::SPLICE_F_MOVE | libc::SPLICE_F_MORE;
+
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err(anyhow!("Transfer cancelled by user"));
+        }
+        if let Some(0) = remaining {
+            break;
+        }
+
+        let to_splice = if let Some(rem) = remaining {
+            (rem as usize).min(chunk_size)
+        } else {
+            chunk_size
+        };
+
+        // SAFETY: `in_fd` and `pipe_w_fd` are valid open file descriptors. Null offset pointers
+        // instruct the kernel to update file offsets in-place.
+        let n_in = unsafe {
+            libc::splice(
+                in_fd,
+                std::ptr::null_mut(),
+                pipe_w_fd,
+                std::ptr::null_mut(),
+                to_splice,
+                flags,
+            )
+        };
+
+        if n_in == 0 {
+            break; // EOF
+        } else if n_in < 0 {
+            let err = std::io::Error::last_os_error();
+            let raw = err.raw_os_error().unwrap_or(0);
+            if raw == libc::EINTR {
+                continue;
+            }
+            if stats.get_bytes() == 0
+                && (raw == libc::EINVAL || raw == libc::ENOSYS || raw == libc::EBADF)
+            {
+                return Ok(false); // Graceful fallback if descriptor does not support splice
+            }
+            return Err(anyhow!("splice input error: {}", err));
+        }
+
+        let mut in_pipe = n_in as usize;
+        while in_pipe > 0 {
+            // SAFETY: `pipe_r_fd` and `out_fd` are valid open file descriptors.
+            let n_out = unsafe {
+                libc::splice(
+                    pipe_r_fd,
+                    std::ptr::null_mut(),
+                    out_fd,
+                    std::ptr::null_mut(),
+                    in_pipe,
+                    flags,
+                )
+            };
+            if n_out < 0 {
+                let err = std::io::Error::last_os_error();
+                let raw = err.raw_os_error().unwrap_or(0);
+                if raw == libc::EINTR {
+                    continue;
+                }
+                return Err(anyhow!("splice output error: {}", err));
+            }
+            in_pipe -= n_out as usize;
+        }
+
+        let copied = n_in as usize;
+        stats.add_bytes(copied as u64);
+        stats
+            .records_in_full
+            .fetch_add((copied / bs) as u64, Ordering::Relaxed);
+        if !copied.is_multiple_of(bs) {
+            stats.inc_in_part();
+        }
+        stats
+            .records_out_full
+            .fetch_add((copied / bs) as u64, Ordering::Relaxed);
+        if !copied.is_multiple_of(bs) {
+            stats.inc_out_part();
+        }
+
+        if let Some(ref mut rem) = remaining {
+            *rem = rem.saturating_sub(copied as u64);
+        }
+    }
+
+    Ok(true)
 }
 
 fn execute_dry_run(cfg: &Config) -> Result<()> {
@@ -389,7 +518,7 @@ pub fn execute_transfer_with_control(
     stats: Arc<Stats>,
     cancel_flag: Arc<AtomicBool>,
 ) -> Result<Option<(String, &'static str)>> {
-    // Fast-path: Kernel Zero-Copy Reflink
+    // 1. Fast-path: Kernel Zero-Copy Reflink
     if can_use_reflink(cfg) && cfg.threads <= 1 {
         if let (Some(ref in_path), Some(ref out_path)) = (&cfg.input, &cfg.output) {
             if let (Ok(mut in_f), Ok(mut out_f)) = (
@@ -419,10 +548,66 @@ pub fn execute_transfer_with_control(
         }
     }
 
+    // 2. Kernel Zero-Copy Pipe Splicing (-e splice)
+    #[cfg(target_os = "linux")]
+    if cfg.engine == Engine::Splice
+        && cfg.hash_algo == HashAlgo::None
+        && !cfg.swab
+        && !cfg.sparse
+        && !cfg.sync
+    {
+        let mut in_file_holder: Option<File> = None;
+        let mut out_file_holder: Option<File> = None;
+
+        let in_fd = if let Some(ref in_path) = cfg.input {
+            let mut f = open_input_file(in_path, cfg.direct)?;
+            if cfg.skip_bytes > 0 {
+                let _ = f.seek(SeekFrom::Start(cfg.skip_bytes));
+            }
+            let fd = f.as_raw_fd();
+            in_file_holder = Some(f);
+            fd
+        } else {
+            libc::STDIN_FILENO
+        };
+
+        let out_fd = if let Some(ref out_path) = cfg.output {
+            let mut f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
+            if cfg.seek_bytes > 0 {
+                let _ = f.seek(SeekFrom::Start(cfg.seek_bytes));
+            }
+            let fd = f.as_raw_fd();
+            out_file_holder = Some(f);
+            fd
+        } else {
+            libc::STDOUT_FILENO
+        };
+
+        if let Ok(true) = try_splice_copy(in_fd, out_fd, cfg, &stats, &cancel_flag) {
+            if let Some(ref f) = in_file_holder {
+                if cfg.nocache {
+                    evict_page_cache(f);
+                }
+            }
+            if let Some(ref f) = out_file_holder {
+                if cfg.fdatasync {
+                    let _ = f.sync_data();
+                } else if cfg.fsync {
+                    let _ = f.sync_all();
+                }
+                if cfg.nocache {
+                    evict_page_cache(f);
+                }
+            }
+            return Ok(None);
+        }
+    }
+
     let mut hasher = InFlightHasher::new(cfg.hash_algo);
 
-    // Asynchronous double-buffering pipeline execution
+    // 3. Asynchronous 3-Stage Ringbuffer Pipeline (-e async)
     if cfg.engine == Engine::Async {
+        let mut in_file_opt: Option<File> = None;
         let input_reader: Box<dyn Read + Send> = if let Some(ref in_path) = cfg.input {
             let mut f = open_input_file(in_path, cfg.direct)?;
             if cfg.skip_bytes > 0 {
@@ -430,40 +615,53 @@ pub fn execute_transfer_with_control(
                     anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e)
                 })?;
             }
+            in_file_opt = f.try_clone().ok();
             Box::new(f)
         } else {
             Box::new(std::io::stdin())
         };
 
-        let mut output_writer: Box<dyn Write> = if let Some(ref out_path) = cfg.output {
+        let mut out_raw_file: Option<File> = if let Some(ref out_path) = cfg.output {
             let mut f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
             if cfg.seek_bytes > 0 {
                 f.seek(SeekFrom::Start(cfg.seek_bytes)).map_err(|e| {
                     anyhow!("Failed to seek output to offset {}: {}", cfg.seek_bytes, e)
                 })?;
             }
-            Box::new(f)
+            Some(f)
         } else {
-            Box::new(std::io::stdout())
+            None
         };
 
         execute_async_transfer(
             input_reader,
-            &mut output_writer,
+            &mut out_raw_file,
             cfg,
             &stats,
             &mut hasher,
             &cancel_flag,
         )?;
 
-        if cfg.fdatasync || cfg.fsync {
-            let _ = output_writer.flush();
+        if let Some(ref f) = in_file_opt {
+            if cfg.nocache {
+                evict_page_cache(f);
+            }
+        }
+        if let Some(ref f) = out_raw_file {
+            if cfg.fdatasync {
+                let _ = f.sync_data();
+            } else if cfg.fsync {
+                let _ = f.sync_all();
+            }
+            if cfg.nocache {
+                evict_page_cache(f);
+            }
         }
 
         return Ok(hasher.finalize_string());
     }
 
-    // io_uring native execution (Linux only, when input & output are seekable files/devices and no in-flight transform is active)
+    // 4. io_uring native execution (Linux only, when input & output are seekable files/devices and no in-flight transform is active)
     #[cfg(target_os = "linux")]
     if (cfg.engine == Engine::Uring || (cfg.threads > 1 && cfg.engine == Engine::Auto))
         && cfg.hash_algo == HashAlgo::None
@@ -476,8 +674,16 @@ pub fn execute_transfer_with_control(
                 let in_f = open_input_file(in_path, cfg.direct)?;
                 let out_f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
 
-                if crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats).is_ok() {
-                    if cfg.fdatasync || cfg.fsync {
+                if crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats, &cancel_flag)
+                    .is_ok()
+                {
+                    if cfg.nocache {
+                        evict_page_cache(&in_f);
+                        evict_page_cache(&out_f);
+                    }
+                    if cfg.fdatasync {
+                        let _ = out_f.sync_data();
+                    } else if cfg.fsync {
                         let _ = out_f.sync_all();
                     }
                     return Ok(None);
@@ -486,13 +692,15 @@ pub fn execute_transfer_with_control(
         }
     }
 
-    // Open Input File/Device for synchronous / streaming / sparse / hashed path
+    // 5. Synchronous / Streaming / Sparse / Hashed Transfer Loop
+    let mut in_file_opt: Option<File> = None;
     let mut input_file: Box<dyn Read> = if let Some(ref in_path) = cfg.input {
         let mut f = open_input_file(in_path, cfg.direct)?;
         if cfg.skip_bytes > 0 {
             f.seek(SeekFrom::Start(cfg.skip_bytes))
                 .map_err(|e| anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e))?;
         }
+        in_file_opt = f.try_clone().ok();
         Box::new(f)
     } else {
         Box::new(std::io::stdin())
@@ -512,9 +720,8 @@ pub fn execute_transfer_with_control(
 
     let mut stdout_handle = std::io::stdout();
 
-    // Main Transfer Loop
     let block_size = cfg.block_size.max(1);
-    let mut buffer = crate::aligned::AlignedBuffer::new(block_size, 4096);
+    let mut buffer = AlignedBuffer::new(block_size, 4096);
 
     let mut remaining_bytes = cfg.limit_bytes;
     let mut remaining_blocks = cfg.count;
@@ -620,6 +827,12 @@ pub fn execute_transfer_with_control(
         }
     }
 
+    if let Some(ref f) = in_file_opt {
+        if cfg.nocache {
+            evict_page_cache(f);
+        }
+    }
+
     if let Some(ref mut f) = out_raw_file {
         if last_was_sparse_hole {
             if let Ok(pos) = f.stream_position() {
@@ -631,6 +844,9 @@ pub fn execute_transfer_with_control(
         } else if cfg.fsync {
             let _ = f.sync_all();
         }
+        if cfg.nocache {
+            evict_page_cache(f);
+        }
     } else if cfg.fdatasync || cfg.fsync {
         let _ = stdout_handle.flush();
     }
@@ -640,7 +856,7 @@ pub fn execute_transfer_with_control(
 
 fn execute_async_transfer(
     mut input: Box<dyn Read + Send>,
-    output: &mut Box<dyn Write>,
+    out_raw_file: &mut Option<File>,
     cfg: &Config,
     stats: &Stats,
     hasher: &mut InFlightHasher,
@@ -656,13 +872,13 @@ fn execute_async_transfer(
         .async_capacity
         .store(queue_depth as u64, Ordering::Relaxed);
 
-    let (data_tx, data_rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
-    let (recycle_tx, recycle_rx) = sync_channel::<Vec<u8>>(queue_depth);
-    let (hash_tx, hash_rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
+    let (data_tx, data_rx) = sync_channel::<(AlignedBuffer, usize)>(queue_depth);
+    let (recycle_tx, recycle_rx) = sync_channel::<AlignedBuffer>(queue_depth);
+    let (hash_tx, hash_rx) = sync_channel::<(AlignedBuffer, usize)>(queue_depth);
 
-    // Pre-allocate exactly queue_depth buffers (zero allocations during transfer loop)
+    // Pre-allocate exactly queue_depth 4096B-aligned buffers (zero allocations during transfer loop)
     for _ in 0..queue_depth {
-        let _ = recycle_tx.send(vec![0u8; block_size]);
+        let _ = recycle_tx.send(AlignedBuffer::new(block_size, 4096));
     }
 
     let limit_bytes = cfg.limit_bytes;
@@ -695,7 +911,7 @@ fn execute_async_transfer(
                 block_size
             };
 
-            // Acquire recycled buffer with zero heap allocations
+            // Acquire recycled 4096B-aligned buffer with zero heap allocations
             let mut buf = match recycle_rx.recv() {
                 Ok(b) => b,
                 Err(_) => break, // Consumer terminated
@@ -746,6 +962,9 @@ fn execute_async_transfer(
         thread_hasher
     });
 
+    let mut stdout_handle = std::io::stdout();
+    let mut last_was_sparse_hole = false;
+
     // Stage 2: Writer Thread (Consumer & Dispatcher)
     while let Ok((mut buf, n)) = data_rx.recv() {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -768,9 +987,34 @@ fn execute_async_transfer(
             n
         };
 
-        output
-            .write_all(&buf[..write_len])
-            .map_err(|e| anyhow!("Write error in async pipeline: {}", e))?;
+        if let Some(ref mut f) = out_raw_file {
+            if cfg.sparse && buf[..write_len].iter().all(|&b| b == 0) {
+                if f.seek(SeekFrom::Current(write_len as i64)).is_ok() {
+                    last_was_sparse_hole = true;
+                } else {
+                    f.write_all(&buf[..write_len])
+                        .map_err(|e| anyhow!("Write error in async pipeline: {}", e))?;
+                    last_was_sparse_hole = false;
+                }
+            } else {
+                if let Err(e) = f.write_all(&buf[..write_len]) {
+                    if let (true, Some(ref out_path)) = (cfg.direct, &cfg.output) {
+                        let cur_pos = f.stream_position().unwrap_or(0);
+                        let mut fallback_f = OpenOptions::new().write(true).open(out_path)?;
+                        fallback_f.seek(SeekFrom::Start(cur_pos))?;
+                        fallback_f.write_all(&buf[..write_len])?;
+                        *f = fallback_f;
+                    } else {
+                        return Err(anyhow!("Write error in async pipeline: {}", e));
+                    }
+                }
+                last_was_sparse_hole = false;
+            }
+        } else {
+            stdout_handle
+                .write_all(&buf[..write_len])
+                .map_err(|e| anyhow!("Write error in async pipeline: {}", e))?;
+        }
 
         if write_len == block_size {
             stats.inc_out_full();
@@ -784,6 +1028,14 @@ fn execute_async_transfer(
             let _ = hash_tx.send((buf, n));
         } else {
             let _ = recycle_tx.send(buf);
+        }
+    }
+
+    if let Some(ref mut f) = out_raw_file {
+        if last_was_sparse_hole {
+            if let Ok(pos) = f.stream_position() {
+                let _ = f.set_len(pos);
+            }
         }
     }
 

@@ -1,15 +1,5 @@
-mod aligned;
-mod args;
-mod engine;
-mod hash;
-mod safety;
-mod stats;
-mod swab;
-
-#[cfg(target_os = "linux")]
-mod uring;
-
 use anyhow::Result;
+use blkcp::{args, engine, safety};
 
 fn main() -> Result<()> {
     let cfg = match args::parse_args() {
@@ -20,11 +10,13 @@ fn main() -> Result<()> {
         }
     };
 
-    // Target Safety Guard: Check mount status of output target (HOL-Guard compatible)
-    if let Some(ref out_path) = cfg.output {
-        if let Err(e) = safety::check_target_safety(out_path, cfg.force) {
-            eprintln!("blkcp: {}", e);
-            std::process::exit(1);
+    // Target Safety Guard: Check mount status of output target (unless dry-run inspects it)
+    if !cfg.dry_run {
+        if let Some(ref out_path) = cfg.output {
+            if let Err(e) = safety::check_target_safety(out_path, cfg.force) {
+                eprintln!("blkcp: {}", e);
+                std::process::exit(1);
+            }
         }
     }
 

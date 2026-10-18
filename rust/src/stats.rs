@@ -8,6 +8,9 @@ pub struct Stats {
     pub records_out_full: AtomicU64,
     pub records_out_part: AtomicU64,
     pub bytes_copied: AtomicU64,
+    pub async_capacity: AtomicU64,
+    pub reader_stalls: AtomicU64,
+    pub writer_stalls: AtomicU64,
 }
 
 impl Stats {
@@ -19,6 +22,9 @@ impl Stats {
             records_out_full: AtomicU64::new(0),
             records_out_part: AtomicU64::new(0),
             bytes_copied: AtomicU64::new(0),
+            async_capacity: AtomicU64::new(0),
+            reader_stalls: AtomicU64::new(0),
+            writer_stalls: AtomicU64::new(0),
         }
     }
 
@@ -65,15 +71,7 @@ impl Stats {
         eprintln!("{}+{} records in", r_in_f, r_in_p);
         eprintln!("{}+{} records out", r_out_f, r_out_p);
 
-        let (speed_val, speed_unit) = if speed >= 1_000_000_000.0 {
-            (speed / 1_000_000_000.0, "GB/s")
-        } else if speed >= 1_000_000.0 {
-            (speed / 1_000_000.0, "MB/s")
-        } else if speed >= 1_000.0 {
-            (speed / 1_000.0, "kB/s")
-        } else {
-            (speed, "B/s")
-        };
+        let (speed_val, speed_unit) = format_speed(speed);
 
         eprintln!(
             "{} bytes ({}) copied, {:.5} s, {:.1} {}",
@@ -91,13 +89,6 @@ impl Stats {
         json: bool,
         hash_info: Option<(String, &'static str)>,
     ) {
-        if quiet {
-            if let Some((hash_val, algo_name)) = hash_info {
-                eprintln!("{}: {}", algo_name, hash_val);
-            }
-            return;
-        }
-
         let r_in_f = self.records_in_full.load(Ordering::Relaxed);
         let r_in_p = self.records_in_part.load(Ordering::Relaxed);
         let r_out_f = self.records_out_full.load(Ordering::Relaxed);
@@ -113,19 +104,22 @@ impl Stats {
             return;
         }
 
+        if quiet {
+            if let Some((hash_val, algo_name)) = hash_info {
+                if algo_name == "blks" {
+                    eprintln!("blks:   {}", hash_val);
+                } else {
+                    eprintln!("{}: {}", algo_name, hash_val);
+                }
+            }
+            return;
+        }
+
         // Standard GNU dd format compatibility
         eprintln!("{}+{} records in", r_in_f, r_in_p);
         eprintln!("{}+{} records out", r_out_f, r_out_p);
 
-        let (speed_val, speed_unit) = if speed >= 1_000_000_000.0 {
-            (speed / 1_000_000_000.0, "GB/s")
-        } else if speed >= 1_000_000.0 {
-            (speed / 1_000_000.0, "MB/s")
-        } else if speed >= 1_000.0 {
-            (speed / 1_000.0, "kB/s")
-        } else {
-            (speed, "B/s")
-        };
+        let (speed_val, speed_unit) = format_speed(speed);
 
         eprintln!(
             "{} bytes ({}) copied, {:.5} s, {:.1} {}",
@@ -137,7 +131,11 @@ impl Stats {
         );
 
         if let Some((hash_val, algo_name)) = hash_info {
-            eprintln!("{}: {}", algo_name, hash_val);
+            if algo_name == "blks" {
+                eprintln!("blks:   {}", hash_val);
+            } else {
+                eprintln!("{}: {}", algo_name, hash_val);
+            }
         }
     }
 }
@@ -148,7 +146,19 @@ impl Default for Stats {
     }
 }
 
-fn human_readable_bytes(bytes: u64) -> String {
+pub fn format_speed(speed: f64) -> (f64, &'static str) {
+    if speed >= 1_000_000_000.0 {
+        (speed / 1_000_000_000.0, "GB/s")
+    } else if speed >= 1_000_000.0 {
+        (speed / 1_000_000.0, "MB/s")
+    } else if speed >= 1_000.0 {
+        (speed / 1_000.0, "kB/s")
+    } else {
+        (speed, "B/s")
+    }
+}
+
+pub fn human_readable_bytes(bytes: u64) -> String {
     if bytes >= 1024 * 1024 * 1024 {
         format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
     } else if bytes >= 1024 * 1024 {
@@ -168,18 +178,36 @@ fn serde_json_lite(
 ) -> String {
     let bytes = stats.bytes_copied.load(Ordering::Relaxed);
     let r_in_f = stats.records_in_full.load(Ordering::Relaxed);
+    let r_in_p = stats.records_in_part.load(Ordering::Relaxed);
     let r_out_f = stats.records_out_full.load(Ordering::Relaxed);
+    let r_out_p = stats.records_out_part.load(Ordering::Relaxed);
+    let cap = stats.async_capacity.load(Ordering::Relaxed);
+    let r_stalls = stats.reader_stalls.load(Ordering::Relaxed);
+    let w_stalls = stats.writer_stalls.load(Ordering::Relaxed);
 
-    let mut out = format!(
-        "{{\"bytes_copied\":{},\"elapsed_sec\":{:.5},\"speed_bps\":{:.0},\"records_in_full\":{},\"records_out_full\":{}",
-        bytes, elapsed, speed, r_in_f, r_out_f
-    );
-    if let Some((hash_val, algo_name)) = hash_info {
-        out.push_str(&format!(
-            ",\"hash_algo\":\"{}\",\"hash\":\"{}\"",
-            algo_name, hash_val
-        ));
-    }
-    out.push('}');
-    out
+    let pipeline_json = if cap > 0 {
+        format!(
+            "{{\"capacity\":{},\"reader_stalls\":{},\"writer_stalls\":{}}}",
+            cap, r_stalls, w_stalls
+        )
+    } else {
+        "null".to_string()
+    };
+
+    let (checksum_json, sha256_json) = if let Some((ref hash_val, algo_name)) = hash_info {
+        (
+            format!(
+                "{{\"algorithm\":\"{}\",\"digest\":\"{}\"}}",
+                algo_name, hash_val
+            ),
+            format!("\"{}\"", hash_val),
+        )
+    } else {
+        ("null".to_string(), "null".to_string())
+    };
+
+    format!(
+        "{{\"event\":\"finished\",\"copied_bytes\":{},\"records_in\":{{\"full\":{},\"partial\":{},\"truncated\":0}},\"records_out\":{{\"full\":{},\"partial\":{}}},\"elapsed_s\":{:.4},\"avg_speed_bps\":{:.0},\"pipeline\":{},\"checksum\":{},\"sha256\":{}}}",
+        bytes, r_in_f, r_in_p, r_out_f, r_out_p, elapsed, speed, pipeline_json, checksum_json, sha256_json
+    )
 }

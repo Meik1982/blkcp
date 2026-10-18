@@ -20,7 +20,7 @@ pub fn execute_uring_transfer(
     let mut ring =
         IoUring::new(queue_depth).map_err(|e| anyhow!("Failed to initialize io_uring: {}", e))?;
 
-    let block_size = cfg.block_size.max(512);
+    let block_size = cfg.block_size.max(1);
     let in_fd = types::Fd(in_file.as_raw_fd());
     let out_fd = types::Fd(out_file.as_raw_fd());
 
@@ -143,7 +143,7 @@ pub fn execute_uring_sharded(
     let num_workers = cfg.threads.clamp(2, 64);
     let chunk_size = (64 * 1024 * 1024u64).max(cfg.block_size as u64); // 64 MiB stripes
 
-    let block_size = cfg.block_size.max(512);
+    let block_size = cfg.block_size.max(1);
     let total_bytes_to_copy = cfg
         .limit_bytes
         .or_else(|| cfg.count.map(|cnt| cnt.saturating_mul(block_size as u64)));

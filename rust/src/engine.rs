@@ -3,7 +3,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::Ordering;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::args::{Config, Engine, HashAlgo};
@@ -28,7 +29,7 @@ fn install_signal_handler(stats: Arc<Stats>) {
 #[cfg(not(unix))]
 fn install_signal_handler(_stats: Arc<Stats>) {}
 
-fn is_regular_file_or_new(path: &std::path::Path) -> bool {
+fn is_regular_file_or_new(path: &Path) -> bool {
     if let Ok(metadata) = std::fs::metadata(path) {
         #[cfg(unix)]
         {
@@ -43,6 +44,40 @@ fn is_regular_file_or_new(path: &std::path::Path) -> bool {
     } else {
         true
     }
+}
+
+fn open_input_file(path: &Path, direct: bool) -> Result<File> {
+    if direct {
+        let mut opts = OpenOptions::new();
+        opts.read(true).custom_flags(libc::O_DIRECT);
+        if let Ok(f) = opts.open(path) {
+            return Ok(f);
+        }
+    }
+    OpenOptions::new()
+        .read(true)
+        .open(path)
+        .map_err(|e| anyhow!("Failed to open input '{}': {}", path.display(), e))
+}
+
+fn open_output_file(path: &Path, notrunc: bool, direct: bool) -> Result<File> {
+    let should_trunc = !notrunc && is_regular_file_or_new(path);
+    if direct {
+        let mut opts = OpenOptions::new();
+        opts.write(true)
+            .create(true)
+            .truncate(should_trunc)
+            .custom_flags(libc::O_DIRECT);
+        if let Ok(f) = opts.open(path) {
+            return Ok(f);
+        }
+    }
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(should_trunc)
+        .open(path)
+        .map_err(|e| anyhow!("Failed to open output '{}': {}", path.display(), e))
 }
 
 fn can_use_reflink(cfg: &Config) -> bool {
@@ -69,6 +104,7 @@ fn try_reflink_copy(
     out_file: &mut File,
     cfg: &Config,
     stats: &Stats,
+    cancel_flag: &AtomicBool,
 ) -> Result<bool> {
     use nix::sys::stat::{fstat, SFlag};
 
@@ -93,7 +129,7 @@ fn try_reflink_copy(
         return Ok(false);
     }
 
-    let chunk_size = (64 * 1024 * 1024).max(cfg.block_size); // 64 MiB chunks
+    let chunk_size = (64 * 1024 * 1024).max(cfg.block_size); // 64 MiB
     let mut remaining = cfg.limit_bytes;
     if let Some(cnt) = cfg.count {
         let total_from_count = cnt.saturating_mul(cfg.block_size as u64);
@@ -101,6 +137,9 @@ fn try_reflink_copy(
     }
 
     loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err(anyhow!("Transfer cancelled by user"));
+        }
         if let Some(0) = remaining {
             break;
         }
@@ -178,31 +217,185 @@ fn try_reflink_copy(
     _out_file: &mut File,
     _cfg: &Config,
     _stats: &Stats,
+    _cancel_flag: &AtomicBool,
 ) -> Result<bool> {
     Ok(false) // Portable fallback
 }
 
+fn execute_dry_run(cfg: &Config) -> Result<()> {
+    let (in_path_str, in_type, in_exists, in_size) = if let Some(ref p) = cfg.input {
+        let p_str = p.to_string_lossy().to_string();
+        if let Ok(meta) = std::fs::metadata(p) {
+            #[cfg(unix)]
+            let t = {
+                use std::os::unix::fs::FileTypeExt;
+                let ft = meta.file_type();
+                if ft.is_block_device() {
+                    "block_device"
+                } else if ft.is_char_device() {
+                    "character_device"
+                } else if ft.is_fifo() {
+                    "fifo_pipe"
+                } else if ft.is_dir() {
+                    "directory"
+                } else {
+                    "regular_file"
+                }
+            };
+            #[cfg(not(unix))]
+            let t = if meta.is_dir() {
+                "directory"
+            } else {
+                "regular_file"
+            };
+            (p_str, t, true, meta.len() as i64)
+        } else {
+            (p_str, "missing", false, -1i64)
+        }
+    } else {
+        ("stdin".to_string(), "fifo_pipe", true, -1i64)
+    };
+
+    let (out_path_str, out_type, out_exists, out_size) = if let Some(ref p) = cfg.output {
+        let p_str = p.to_string_lossy().to_string();
+        if let Ok(meta) = std::fs::metadata(p) {
+            #[cfg(unix)]
+            let t = {
+                use std::os::unix::fs::FileTypeExt;
+                let ft = meta.file_type();
+                if ft.is_block_device() {
+                    "block_device"
+                } else if ft.is_char_device() {
+                    "character_device"
+                } else if ft.is_fifo() {
+                    "fifo_pipe"
+                } else if ft.is_dir() {
+                    "directory"
+                } else {
+                    "regular_file"
+                }
+            };
+            #[cfg(not(unix))]
+            let t = if meta.is_dir() {
+                "directory"
+            } else {
+                "regular_file"
+            };
+            (p_str, t, true, meta.len() as i64)
+        } else {
+            (p_str, "new_file", false, -1i64)
+        }
+    } else {
+        ("stdout".to_string(), "fifo_pipe", true, -1i64)
+    };
+
+    let (guard_status, guard_detail) = if let Some(ref p) = cfg.output {
+        if let Some(detail) = crate::safety::detect_mounted_violation(p) {
+            if cfg.force {
+                ("overridden", detail)
+            } else {
+                ("blocked", detail)
+            }
+        } else {
+            ("ok", String::new())
+        }
+    } else {
+        ("ok", String::new())
+    };
+
+    let engine_name = match cfg.engine {
+        Engine::Uring => "io_uring",
+        Engine::Reflink => "reflink",
+        Engine::Splice => "splice",
+        Engine::Async => "async",
+        Engine::Sync => "sync",
+        Engine::Auto => {
+            if can_use_reflink(cfg)
+                && in_type == "regular_file"
+                && (out_type == "regular_file" || out_type == "new_file")
+            {
+                "reflink"
+            } else if in_type == "block_device" || out_type == "block_device" || cfg.direct {
+                "io_uring"
+            } else {
+                "sync"
+            }
+        }
+    };
+
+    let effective_bs = cfg.block_size.max(1);
+    let limit_val: i64 = cfg.limit_bytes.map(|v| v as i64).unwrap_or(-1);
+
+    if cfg.json {
+        println!(
+            "{{\"event\":\"dry_run\",\"dry_run\":true,\"input\":{{\"path\":\"{}\",\"type\":\"{}\",\"exists\":{},\"size_bytes\":{}}},\"output\":{{\"path\":\"{}\",\"type\":\"{}\",\"exists\":{},\"size_bytes\":{},\"safety_guard\":\"{}\",\"safety_guard_detail\":\"{}\"}},\"plan\":{{\"engine\":\"{}\",\"blocksize\":{},\"autotune\":{},\"direct_io\":{},\"nocache\":{},\"sha256\":{},\"limit_bytes\":{},\"skip_bytes\":{},\"seek_bytes\":{}}}}}",
+            in_path_str,
+            in_type,
+            in_exists,
+            in_size,
+            out_path_str,
+            out_type,
+            out_exists,
+            out_size,
+            guard_status,
+            guard_detail,
+            engine_name,
+            effective_bs,
+            cfg.autotune,
+            cfg.direct,
+            cfg.nocache,
+            cfg.hash_algo != HashAlgo::None,
+            limit_val,
+            cfg.skip_bytes,
+            cfg.seek_bytes
+        );
+    } else {
+        println!("=== blkcp Dry-Run Execution Plan ===");
+        println!(
+            "Input:        {} ({}, {} bytes)",
+            in_path_str, in_type, in_size
+        );
+        println!(
+            "Output:       {} ({}, {} bytes)",
+            out_path_str, out_type, out_size
+        );
+        println!("Safety Guard: {} {}", guard_status, guard_detail);
+        println!("Engine:       {}", engine_name);
+        println!("Block Size:   {} bytes", effective_bs);
+        println!(
+            "Note: Dry-run simulation mode (-n / --dry-run) active. No data was transferred or modified."
+        );
+    }
+
+    Ok(())
+}
+
 pub fn execute_transfer(cfg: &Config) -> Result<()> {
     if cfg.dry_run {
-        eprintln!("blkcp (dry-run): Target inspection passed. No data written.");
-        return Ok(());
+        return execute_dry_run(cfg);
     }
 
     let stats = Arc::new(Stats::new());
     install_signal_handler(Arc::clone(&stats));
+    let cancel_flag = Arc::new(AtomicBool::new(false));
 
+    let hash_info = execute_transfer_with_control(cfg, Arc::clone(&stats), cancel_flag)?;
+    stats.print_summary(cfg.quiet, cfg.json, hash_info);
+    Ok(())
+}
+
+pub fn execute_transfer_with_control(
+    cfg: &Config,
+    stats: Arc<Stats>,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<Option<(String, &'static str)>> {
     // Fast-path: Kernel Zero-Copy Reflink
-    if can_use_reflink(cfg) {
+    if can_use_reflink(cfg) && cfg.threads <= 1 {
         if let (Some(ref in_path), Some(ref out_path)) = (&cfg.input, &cfg.output) {
-            let in_file_res = OpenOptions::new().read(true).open(in_path);
-            let mut out_opts = OpenOptions::new();
-            out_opts.write(true).create(true);
-            if !cfg.notrunc {
-                out_opts.truncate(true);
-            }
-            let out_file_res = out_opts.open(out_path);
-
-            if let (Ok(mut in_f), Ok(mut out_f)) = (in_file_res, out_file_res) {
+            if let (Ok(mut in_f), Ok(mut out_f)) = (
+                open_input_file(in_path, false),
+                open_output_file(out_path, cfg.notrunc, false),
+            ) {
                 if cfg.skip_bytes > 0 {
                     let _ = in_f.seek(SeekFrom::Start(cfg.skip_bytes));
                 }
@@ -210,14 +403,12 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
                     let _ = out_f.seek(SeekFrom::Start(cfg.seek_bytes));
                 }
 
-                let stats_mut = Stats::new();
-                match try_reflink_copy(&mut in_f, &mut out_f, cfg, &stats_mut) {
+                match try_reflink_copy(&mut in_f, &mut out_f, cfg, &stats, &cancel_flag) {
                     Ok(true) => {
                         if cfg.fdatasync || cfg.fsync {
-                            let _ = out_f.flush();
+                            let _ = out_f.sync_all();
                         }
-                        stats_mut.print_summary(cfg.quiet, cfg.json, None);
-                        return Ok(());
+                        return Ok(None);
                     }
                     Ok(false) => {
                         // Fallback to standard transfer
@@ -233,15 +424,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
     // Asynchronous double-buffering pipeline execution
     if cfg.engine == Engine::Async {
         let input_reader: Box<dyn Read + Send> = if let Some(ref in_path) = cfg.input {
-            let mut opts = OpenOptions::new();
-            opts.read(true);
-            if cfg.direct {
-                opts.custom_flags(libc::O_DIRECT);
-            }
-            let mut f = opts
-                .open(in_path)
-                .map_err(|e| anyhow!("Failed to open input '{}': {}", in_path.display(), e))?;
-
+            let mut f = open_input_file(in_path, cfg.direct)?;
             if cfg.skip_bytes > 0 {
                 f.seek(SeekFrom::Start(cfg.skip_bytes)).map_err(|e| {
                     anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e)
@@ -253,18 +436,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         };
 
         let mut output_writer: Box<dyn Write> = if let Some(ref out_path) = cfg.output {
-            let mut opts = OpenOptions::new();
-            opts.write(true).create(true);
-            if !cfg.notrunc && is_regular_file_or_new(out_path) {
-                opts.truncate(true);
-            }
-            if cfg.direct {
-                opts.custom_flags(libc::O_DIRECT);
-            }
-            let mut f = opts
-                .open(out_path)
-                .map_err(|e| anyhow!("Failed to open output '{}': {}", out_path.display(), e))?;
-
+            let mut f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
             if cfg.seek_bytes > 0 {
                 f.seek(SeekFrom::Start(cfg.seek_bytes)).map_err(|e| {
                     anyhow!("Failed to seek output to offset {}: {}", cfg.seek_bytes, e)
@@ -275,59 +447,48 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             Box::new(std::io::stdout())
         };
 
-        execute_async_transfer(input_reader, &mut output_writer, cfg, &stats, &mut hasher)?;
+        execute_async_transfer(
+            input_reader,
+            &mut output_writer,
+            cfg,
+            &stats,
+            &mut hasher,
+            &cancel_flag,
+        )?;
 
         if cfg.fdatasync || cfg.fsync {
             let _ = output_writer.flush();
         }
 
-        let hash_info = hasher.finalize_string();
-        stats.print_summary(cfg.quiet, cfg.json, hash_info);
-        return Ok(());
+        return Ok(hasher.finalize_string());
     }
 
-    // io_uring native execution (Linux only)
+    // io_uring native execution (Linux only, when input & output are seekable files/devices and no in-flight transform is active)
     #[cfg(target_os = "linux")]
-    if cfg.engine == Engine::Uring && cfg.hash_algo == HashAlgo::None && !cfg.swab {
+    if (cfg.engine == Engine::Uring || (cfg.threads > 1 && cfg.engine == Engine::Auto))
+        && cfg.hash_algo == HashAlgo::None
+        && !cfg.swab
+        && !cfg.sparse
+        && !cfg.sync
+    {
         if let (Some(ref in_path), Some(ref out_path)) = (&cfg.input, &cfg.output) {
-            let mut in_opts = OpenOptions::new();
-            in_opts.read(true);
-            if cfg.direct {
-                in_opts.custom_flags(libc::O_DIRECT);
-            }
-            let in_f = in_opts.open(in_path)?;
+            if is_regular_file_or_new(in_path) || in_path.to_string_lossy().starts_with("/dev/") {
+                let in_f = open_input_file(in_path, cfg.direct)?;
+                let out_f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
 
-            let mut out_opts = OpenOptions::new();
-            out_opts.write(true).create(true);
-            if !cfg.notrunc {
-                out_opts.truncate(true);
-            }
-            if cfg.direct {
-                out_opts.custom_flags(libc::O_DIRECT);
-            }
-            let out_f = out_opts.open(out_path)?;
-
-            if let Ok(()) = crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats) {
-                if cfg.fdatasync || cfg.fsync {
-                    let _ = nix::unistd::fsync(out_f.as_raw_fd());
+                if crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats).is_ok() {
+                    if cfg.fdatasync || cfg.fsync {
+                        let _ = out_f.sync_all();
+                    }
+                    return Ok(None);
                 }
-                stats.print_summary(cfg.quiet, cfg.json, None);
-                return Ok(());
             }
         }
     }
 
-    // Open Input File/Device
+    // Open Input File/Device for synchronous / streaming / sparse / hashed path
     let mut input_file: Box<dyn Read> = if let Some(ref in_path) = cfg.input {
-        let mut opts = OpenOptions::new();
-        opts.read(true);
-        if cfg.direct {
-            opts.custom_flags(libc::O_DIRECT);
-        }
-        let mut f = opts
-            .open(in_path)
-            .map_err(|e| anyhow!("Failed to open input '{}': {}", in_path.display(), e))?;
-
+        let mut f = open_input_file(in_path, cfg.direct)?;
         if cfg.skip_bytes > 0 {
             f.seek(SeekFrom::Start(cfg.skip_bytes))
                 .map_err(|e| anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e))?;
@@ -337,38 +498,32 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         Box::new(std::io::stdin())
     };
 
-    // Open Output File/Device
-    let mut output_file: Box<dyn Write> = if let Some(ref out_path) = cfg.output {
-        let mut opts = OpenOptions::new();
-        opts.write(true).create(true);
-        if !cfg.notrunc {
-            opts.truncate(true);
-        }
-        if cfg.direct {
-            opts.custom_flags(libc::O_DIRECT);
-        }
-        let mut f = opts
-            .open(out_path)
-            .map_err(|e| anyhow!("Failed to open output '{}': {}", out_path.display(), e))?;
-
+    let mut out_raw_file: Option<File> = if let Some(ref out_path) = cfg.output {
+        let mut f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
         if cfg.seek_bytes > 0 {
             f.seek(SeekFrom::Start(cfg.seek_bytes)).map_err(|e| {
                 anyhow!("Failed to seek output to offset {}: {}", cfg.seek_bytes, e)
             })?;
         }
-        Box::new(f)
+        Some(f)
     } else {
-        Box::new(std::io::stdout())
+        None
     };
 
+    let mut stdout_handle = std::io::stdout();
+
     // Main Transfer Loop
-    let block_size = cfg.block_size.max(512);
+    let block_size = cfg.block_size.max(1);
     let mut buffer = crate::aligned::AlignedBuffer::new(block_size, 4096);
 
     let mut remaining_bytes = cfg.limit_bytes;
     let mut remaining_blocks = cfg.count;
+    let mut last_was_sparse_hole = false;
 
     loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err(anyhow!("Transfer cancelled by user"));
+        }
         if let Some(0) = remaining_bytes {
             break;
         }
@@ -418,10 +573,36 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             bytes_read
         };
 
-        // Write to output
-        output_file
-            .write_all(&buffer[..write_len])
-            .map_err(|e| anyhow!("Write error: {}", e))?;
+        // Write to output (with sparse hole-punching support if --sparse is active)
+        if let Some(ref mut f) = out_raw_file {
+            if cfg.sparse && buffer[..write_len].iter().all(|&b| b == 0) {
+                if f.seek(SeekFrom::Current(write_len as i64)).is_ok() {
+                    last_was_sparse_hole = true;
+                } else {
+                    f.write_all(&buffer[..write_len])
+                        .map_err(|e| anyhow!("Write error: {}", e))?;
+                    last_was_sparse_hole = false;
+                }
+            } else {
+                if let Err(e) = f.write_all(&buffer[..write_len]) {
+                    // Handle O_DIRECT unaligned tail fallback by reopening without O_DIRECT
+                    if let (true, Some(ref out_path)) = (cfg.direct, &cfg.output) {
+                        let cur_pos = f.stream_position().unwrap_or(0);
+                        let mut fallback_f = OpenOptions::new().write(true).open(out_path)?;
+                        fallback_f.seek(SeekFrom::Start(cur_pos))?;
+                        fallback_f.write_all(&buffer[..write_len])?;
+                        *f = fallback_f;
+                    } else {
+                        return Err(anyhow!("Write error: {}", e));
+                    }
+                }
+                last_was_sparse_hole = false;
+            }
+        } else {
+            stdout_handle
+                .write_all(&buffer[..write_len])
+                .map_err(|e| anyhow!("Write error: {}", e))?;
+        }
 
         if write_len == block_size {
             stats.inc_out_full();
@@ -439,14 +620,22 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         }
     }
 
-    if cfg.fdatasync || cfg.fsync {
-        let _ = output_file.flush();
+    if let Some(ref mut f) = out_raw_file {
+        if last_was_sparse_hole {
+            if let Ok(pos) = f.stream_position() {
+                let _ = f.set_len(pos);
+            }
+        }
+        if cfg.fdatasync {
+            let _ = f.sync_data();
+        } else if cfg.fsync {
+            let _ = f.sync_all();
+        }
+    } else if cfg.fdatasync || cfg.fsync {
+        let _ = stdout_handle.flush();
     }
 
-    let hash_info = hasher.finalize_string();
-    stats.print_summary(cfg.quiet, cfg.json, hash_info);
-
-    Ok(())
+    Ok(hasher.finalize_string())
 }
 
 fn execute_async_transfer(
@@ -455,11 +644,17 @@ fn execute_async_transfer(
     cfg: &Config,
     stats: &Stats,
     hasher: &mut InFlightHasher,
+    cancel_flag: &Arc<AtomicBool>,
 ) -> Result<()> {
     use std::sync::mpsc::sync_channel;
 
-    let queue_depth = 16;
-    let block_size = cfg.block_size.max(512);
+    let block_size = cfg.block_size.max(1);
+    let queue_depth = cfg
+        .queue_depth
+        .unwrap_or_else(|| (512 * 1024 / block_size).clamp(16, 128));
+    stats
+        .async_capacity
+        .store(queue_depth as u64, Ordering::Relaxed);
 
     let (data_tx, data_rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
     let (recycle_tx, recycle_rx) = sync_channel::<Vec<u8>>(queue_depth);
@@ -475,6 +670,7 @@ fn execute_async_transfer(
     let noerror = cfg.noerror;
     let reader_recycle_tx = recycle_tx.clone();
     let hasher_recycle_tx = recycle_tx.clone();
+    let reader_cancel = Arc::clone(cancel_flag);
 
     // Stage 1: Reader Thread (Producer)
     let reader_handle = std::thread::spawn(move || -> Result<u64> {
@@ -483,6 +679,9 @@ fn execute_async_transfer(
         let mut rem_blocks = count;
 
         loop {
+            if reader_cancel.load(Ordering::Relaxed) {
+                break;
+            }
             if let Some(0) = rem_bytes {
                 break;
             }
@@ -549,6 +748,9 @@ fn execute_async_transfer(
 
     // Stage 2: Writer Thread (Consumer & Dispatcher)
     while let Ok((mut buf, n)) = data_rx.recv() {
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
+        }
         if n == block_size {
             stats.inc_in_full();
         } else {

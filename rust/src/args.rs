@@ -30,6 +30,7 @@ pub struct Config {
     pub seek_bytes: u64,
     pub engine: Engine,
     pub threads: usize,
+    pub queue_depth: Option<usize>,
     pub progress: bool,
     pub json: bool,
     pub quiet: bool,
@@ -60,6 +61,7 @@ impl Default for Config {
             seek_bytes: 0,
             engine: Engine::Auto,
             threads: 1,
+            queue_depth: None,
             progress: false,
             json: false,
             quiet: false,
@@ -161,22 +163,28 @@ pub fn parse_args() -> Result<Config> {
             if i >= args.len() {
                 return Err(anyhow!("Option -b requires an argument"));
             }
-            let sz = parse_size(&args[i])?;
-            if sz == 0 {
+            if args[i].trim().eq_ignore_ascii_case("auto") {
                 cfg.autotune = true;
                 cfg.block_size = 64 * 1024;
             } else {
+                let sz = parse_size(&args[i])?;
+                if sz == 0 {
+                    return Err(anyhow!("Block size cannot be zero"));
+                }
                 cfg.block_size = sz as usize;
             }
         } else if let Some(val) = arg
             .strip_prefix("--block-size=")
             .or_else(|| arg.strip_prefix("--bs="))
         {
-            let sz = parse_size(val)?;
-            if sz == 0 {
+            if val.trim().eq_ignore_ascii_case("auto") {
                 cfg.autotune = true;
                 cfg.block_size = 64 * 1024;
             } else {
+                let sz = parse_size(val)?;
+                if sz == 0 {
+                    return Err(anyhow!("Block size cannot be zero"));
+                }
                 cfg.block_size = sz as usize;
             }
         } else if arg == "-c" || arg == "--count" {
@@ -255,6 +263,22 @@ pub fn parse_args() -> Result<Config> {
             .or_else(|| arg.strip_prefix("--shards="))
         {
             cfg.threads = val.parse()?;
+        } else if arg == "--queue-depth" {
+            i += 1;
+            if i >= args.len() {
+                return Err(anyhow!("Option --queue-depth requires an argument"));
+            }
+            let qd: usize = args[i].parse()?;
+            if qd == 0 {
+                return Err(anyhow!("Queue depth cannot be zero"));
+            }
+            cfg.queue_depth = Some(qd);
+        } else if let Some(val) = arg.strip_prefix("--queue-depth=") {
+            let qd: usize = val.parse()?;
+            if qd == 0 {
+                return Err(anyhow!("Queue depth cannot be zero"));
+            }
+            cfg.queue_depth = Some(qd);
         } else if arg == "-p" || arg == "--progress" {
             cfg.progress = true;
         } else if arg == "-q" || arg == "--quiet" {
@@ -265,6 +289,9 @@ pub fn parse_args() -> Result<Config> {
             cfg.dry_run = true;
         } else if arg == "--autotune" {
             cfg.autotune = true;
+            if cfg.block_size == 512 {
+                cfg.block_size = 64 * 1024;
+            }
         } else if arg == "--direct" {
             cfg.direct = true;
         } else if arg == "--nocache" {

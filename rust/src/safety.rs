@@ -3,11 +3,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
-    if force {
-        return Ok(());
-    }
-
+/// Evaluates whether the output target is a mounted system/block device.
+/// Returns `Some(detail)` if the target or one of its partitions/holders is mounted.
+pub fn detect_mounted_violation(output_path: &Path) -> Option<String> {
     let canonical = match output_path.canonicalize() {
         Ok(p) => p,
         Err(_) => output_path.to_path_buf(),
@@ -15,20 +13,19 @@ pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
 
     let path_str = canonical.to_string_lossy();
 
-    // Only block devices need mount protection
+    // Only block devices in /dev/ need mount protection
     if !path_str.starts_with("/dev/") {
-        return Ok(());
+        return None;
     }
 
     // Special pseudo devices that are always safe to overwrite/discard
     if path_str == "/dev/null" || path_str == "/dev/zero" {
-        return Ok(());
+        return None;
     }
 
-    // Inspect /proc/mounts
     let mounts_file = match File::open("/proc/mounts") {
         Ok(f) => f,
-        Err(_) => return Ok(()), // /proc/mounts unavailable (e.g. non-Linux or chroot)
+        Err(_) => return None,
     };
 
     let reader = BufReader::new(mounts_file);
@@ -43,22 +40,19 @@ pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
 
         // Direct device match
         if mounted_dev == path_str {
-            return Err(anyhow!(
-                "Target Safety Guard: Target device '{}' is mounted on '{}'! Refusing destructive write without --force / -f.",
-                path_str,
-                mount_point
+            return Some(format!(
+                "Target device '{}' is mounted on '{}'",
+                path_str, mount_point
             ));
         }
 
         // Partition match on parent disk (e.g. target is /dev/sda and /dev/sda1 is mounted)
         if mounted_dev.starts_with(path_str.as_ref()) {
             let suffix = &mounted_dev[path_str.len()..];
-            if suffix.chars().all(|c| c.is_ascii_digit() || c == 'p') {
-                return Err(anyhow!(
-                    "Target Safety Guard: Partition '{}' of target device '{}' is mounted on '{}'! Refusing destructive write without --force / -f.",
-                    mounted_dev,
-                    path_str,
-                    mount_point
+            if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == 'p') {
+                return Some(format!(
+                    "Partition '{}' of target device '{}' is mounted on '{}'",
+                    mounted_dev, path_str, mount_point
                 ));
             }
         }
@@ -72,15 +66,28 @@ pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
                 let holder_dev1 = format!("/dev/{}", holder_name);
                 let holder_dev2 = format!("/dev/mapper/{}", holder_name);
                 if mounted_dev == holder_dev1 || mounted_dev.starts_with(&holder_dev2) {
-                    return Err(anyhow!(
-                        "Target Safety Guard: Active device holder '{}' (LVM/LUKS) of '{}' is mounted on '{}'! Refusing destructive write without --force / -f.",
-                        holder_name,
-                        path_str,
-                        mount_point
+                    return Some(format!(
+                        "Active device holder '{}' (LVM/LUKS) of '{}' is mounted on '{}'",
+                        holder_name, path_str, mount_point
                     ));
                 }
             }
         }
+    }
+
+    None
+}
+
+pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
+    if force {
+        return Ok(());
+    }
+
+    if let Some(detail) = detect_mounted_violation(output_path) {
+        return Err(anyhow!(
+            "TARGET SAFETY GUARD: {}! Refusing destructive write without --force / -f.",
+            detail
+        ));
     }
 
     Ok(())

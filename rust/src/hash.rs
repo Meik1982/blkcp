@@ -39,15 +39,15 @@ impl InFlightHasher {
                 for b in res {
                     s.push_str(&format!("{:02x}", b));
                 }
-                Some((s, "SHA-256"))
+                Some((s, "sha256"))
             }
             InFlightHasher::Blake3(h) => {
                 let res = h.finalize();
-                Some((res.to_hex().to_string(), "BLAKE3"))
+                Some((res.to_hex().to_string(), "blake3"))
             }
             InFlightHasher::Blks(h) => {
                 let hash = h.finalize();
-                Some((blks_core::encode_base64(&hash), "BLKS-384"))
+                Some((blks_core::encode_base64(&hash), "blks"))
             }
         }
     }

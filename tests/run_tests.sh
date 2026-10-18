@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BLKCP_BIN="./blkcp"
+BLKCP_BIN="${BLKCP_BIN:-./blkcp}"
 if [[ ! -x "$BLKCP_BIN" ]]; then
   echo "Error: Binary '$BLKCP_BIN' not found. Run 'make' first." >&2
   exit 1

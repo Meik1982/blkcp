@@ -188,20 +188,32 @@ run_bench "11. In-Flight SHA256 (--hash)" \
   VS \
   -i /dev/zero -o /dev/null -b 64K -c 30000 --hash -p
 
-# Test 12: io_uring Asynchronous Kernel Engine (-e uring vs standard sync)
-run_bench "12. io_uring Engine (-e uring)" \
+# Test 12: In-Flight BLAKE3 Tree-Hash (High-Throughput)
+run_bench "12. In-Flight BLAKE3 (--blake3)" \
+  if=/dev/zero of=/dev/null bs=64k count=30000 status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 64K -c 30000 --blake3 -p
+
+# Test 13: In-Flight BLKS-384 Post-Quantum Tree-Hash
+run_bench "13. In-Flight BLKS-384 (--blks)" \
+  if=/dev/zero of=/dev/null bs=64k count=30000 status=progress \
+  VS \
+  -i /dev/zero -o /dev/null -b 64K -c 30000 --blks -p
+
+# Test 14: io_uring Asynchronous Kernel Engine (-e uring vs standard sync)
+run_bench "14. io_uring Engine (-e uring)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_uring.bin" bs=1M status=progress \
   VS \
   -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_uring.bin" -b 1M -e uring -p
 
-# Test 13: SIMD AVX2-accelerated Byte Swapping (--swab)
-run_bench "13. Byte Swap (--swab 2GB)" \
+# Test 15: SIMD AVX2-accelerated Byte Swapping (--swab)
+run_bench "15. Byte Swap (--swab 2GB)" \
   if=/dev/zero of=/dev/null bs=64k count=30000 conv=swab status=progress \
   VS \
   -i /dev/zero -o /dev/null -b 64K -c 30000 --swab -p
 
-# Test 14: In-Kernel Zero-Copy Splice Engine (-e splice vs standard sync)
-run_bench "14. Kernel Splice (-e splice)" \
+# Test 16: In-Kernel Zero-Copy Splice Engine (-e splice vs standard sync)
+run_bench "16. Kernel Splice (-e splice)" \
   if="$TMP_DIR/bench_in.bin" of="$TMP_DIR/bench_sys_splice.bin" bs=1M status=progress \
   VS \
   -i "$TMP_DIR/bench_in.bin" -o "$TMP_DIR/bench_loc_splice.bin" -b 1M -e splice -p

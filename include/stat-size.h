@@ -66,7 +66,7 @@
    anyone knows of a system for which this limit is too small, please
    report it as a bug in this code.  */
 # define STP_BLKSIZE(st) ((0 < (st)->st_blksize \
-                           && (st)->st_blksize <= (size_t) -1 / 8 + 1)  \
+                           && (uintmax_t) (st)->st_blksize <= (size_t) -1 / 8 + 1)  \
                           ? (st)->st_blksize : DEV_BSIZE)
 # if defined hpux || defined __hpux__ || defined __hpux
   /* HP-UX counts st_blocks in 1024-byte units.

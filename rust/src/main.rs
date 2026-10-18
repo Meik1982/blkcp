@@ -1,9 +1,12 @@
+mod aligned;
 mod args;
 mod engine;
 mod hash;
 mod safety;
 mod stats;
 mod swab;
+
+#[cfg(target_os = "linux")]
 mod uring;
 
 use anyhow::Result;

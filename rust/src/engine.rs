@@ -27,6 +27,7 @@ fn can_use_reflink(cfg: &Config) -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn try_reflink_copy(
     in_file: &mut File,
     out_file: &mut File,
@@ -49,7 +50,9 @@ fn try_reflink_copy(
 
     if !in_mode.contains(SFlag::S_IFREG) || !out_mode.contains(SFlag::S_IFREG) {
         if cfg.engine == Engine::Reflink {
-            return Err(anyhow!("copy_file_range requires regular files for input and output"));
+            return Err(anyhow!(
+                "copy_file_range requires regular files for input and output"
+            ));
         }
         return Ok(false);
     }
@@ -89,11 +92,11 @@ fn try_reflink_copy(
             let n = ret as usize;
             stats.bytes_copied += n as u64;
             stats.records_in_full += (n / cfg.block_size) as u64;
-            if n % cfg.block_size != 0 {
+            if !n.is_multiple_of(cfg.block_size) {
                 stats.records_in_part += 1;
             }
             stats.records_out_full += (n / cfg.block_size) as u64;
-            if n % cfg.block_size != 0 {
+            if !n.is_multiple_of(cfg.block_size) {
                 stats.records_out_part += 1;
             }
             if let Some(ref mut rem) = remaining {
@@ -112,7 +115,10 @@ fn try_reflink_copy(
                     || raw_err == libc::EOPNOTSUPP)
             {
                 if cfg.engine == Engine::Reflink {
-                    return Err(anyhow!("copy_file_range not supported for these files: {}", err));
+                    return Err(anyhow!(
+                        "copy_file_range not supported for these files: {}",
+                        err
+                    ));
                 }
                 return Ok(false); // fallback to standard copy
             }
@@ -121,6 +127,16 @@ fn try_reflink_copy(
     }
 
     Ok(true)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn try_reflink_copy(
+    _in_file: &mut File,
+    _out_file: &mut File,
+    _cfg: &Config,
+    _stats: &mut Stats,
+) -> Result<bool> {
+    Ok(false) // Portable fallback
 }
 
 pub fn execute_transfer(cfg: &Config) -> Result<()> {
@@ -182,8 +198,9 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
                 .map_err(|e| anyhow!("Failed to open input '{}': {}", in_path.display(), e))?;
 
             if cfg.skip_bytes > 0 {
-                f.seek(SeekFrom::Start(cfg.skip_bytes))
-                    .map_err(|e| anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e))?;
+                f.seek(SeekFrom::Start(cfg.skip_bytes)).map_err(|e| {
+                    anyhow!("Failed to seek input to offset {}: {}", cfg.skip_bytes, e)
+                })?;
             }
             Box::new(f)
         } else {
@@ -213,7 +230,13 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             Box::new(std::io::stdout())
         };
 
-        execute_async_transfer(input_reader, &mut output_writer, cfg, &mut stats, &mut hasher)?;
+        execute_async_transfer(
+            input_reader,
+            &mut output_writer,
+            cfg,
+            &mut stats,
+            &mut hasher,
+        )?;
 
         if cfg.fdatasync || cfg.fsync {
             let _ = output_writer.flush();
@@ -224,7 +247,8 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         return Ok(());
     }
 
-    // io_uring native execution
+    // io_uring native execution (Linux only)
+    #[cfg(target_os = "linux")]
     if cfg.engine == Engine::Uring && cfg.hash_algo == HashAlgo::None && !cfg.swab {
         if let (Some(ref in_path), Some(ref out_path)) = (&cfg.input, &cfg.output) {
             let mut in_opts = OpenOptions::new();
@@ -300,7 +324,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
 
     // Main Transfer Loop
     let block_size = cfg.block_size.max(512);
-    let mut buffer = vec![0u8; block_size];
+    let mut buffer = crate::aligned::AlignedBuffer::new(block_size, 4096);
 
     let mut remaining_bytes = cfg.limit_bytes;
     let mut remaining_blocks = cfg.count;
@@ -398,12 +422,22 @@ fn execute_async_transfer(
     let queue_depth = 16;
     let block_size = cfg.block_size.max(512);
 
-    let (tx, rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
+    let (data_tx, data_rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
+    let (recycle_tx, recycle_rx) = sync_channel::<Vec<u8>>(queue_depth);
+    let (hash_tx, hash_rx) = sync_channel::<(Vec<u8>, usize)>(queue_depth);
+
+    // Pre-allocate exactly queue_depth buffers (zero allocations during transfer loop)
+    for _ in 0..queue_depth {
+        let _ = recycle_tx.send(vec![0u8; block_size]);
+    }
+
     let limit_bytes = cfg.limit_bytes;
     let count = cfg.count;
     let noerror = cfg.noerror;
+    let reader_recycle_tx = recycle_tx.clone();
+    let hasher_recycle_tx = recycle_tx.clone();
 
-    // Spawn Producer Thread (Reader)
+    // Stage 1: Reader Thread (Producer)
     let reader_handle = std::thread::spawn(move || -> Result<u64> {
         let mut total_read = 0u64;
         let mut rem_bytes = limit_bytes;
@@ -423,14 +457,23 @@ fn execute_async_transfer(
                 block_size
             };
 
-            let mut buf = vec![0u8; block_size];
+            // Acquire recycled buffer with zero heap allocations
+            let mut buf = match recycle_rx.recv() {
+                Ok(b) => b,
+                Err(_) => break, // Consumer terminated
+            };
+
             let n = match input.read(&mut buf[..to_read]) {
                 Ok(0) => break,
                 Ok(bytes) => bytes,
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                    let _ = reader_recycle_tx.send(buf);
+                    continue;
+                }
                 Err(e) => {
                     if noerror {
                         eprintln!("blkcp: read error: {}, continuing...", e);
+                        let _ = reader_recycle_tx.send(buf);
                         continue;
                     } else {
                         return Err(anyhow!("Read error in async pipeline: {}", e));
@@ -446,15 +489,27 @@ fn execute_async_transfer(
                 *rem = rem.saturating_sub(1);
             }
 
-            if tx.send((buf, n)).is_err() {
+            if data_tx.send((buf, n)).is_err() {
                 break;
             }
         }
         Ok(total_read)
     });
 
-    // Consumer Loop (Writer & Hasher)
-    while let Ok((mut buf, n)) = rx.recv() {
+    // Stage 3: Dedicated Parallel Hasher Thread
+    let has_hash = cfg.hash_algo != HashAlgo::None;
+    let mut thread_hasher = InFlightHasher::new(cfg.hash_algo);
+
+    let hash_handle = std::thread::spawn(move || -> InFlightHasher {
+        while let Ok((buf, n)) = hash_rx.recv() {
+            thread_hasher.update(&buf[..n]);
+            let _ = hasher_recycle_tx.send(buf);
+        }
+        thread_hasher
+    });
+
+    // Stage 2: Writer Thread (Consumer & Dispatcher)
+    while let Ok((mut buf, n)) = data_rx.recv() {
         if n == block_size {
             stats.records_in_full += 1;
         } else {
@@ -464,8 +519,6 @@ fn execute_async_transfer(
         if cfg.swab {
             swab_buffer(&mut buf[..n]);
         }
-
-        hasher.update(&buf[..n]);
 
         let write_len = if cfg.sync && n < block_size {
             buf[n..block_size].fill(0);
@@ -485,7 +538,18 @@ fn execute_async_transfer(
         }
 
         stats.bytes_copied += n as u64;
+
+        if has_hash {
+            let _ = hash_tx.send((buf, n));
+        } else {
+            let _ = recycle_tx.send(buf);
+        }
     }
+
+    drop(hash_tx);
+    *hasher = hash_handle
+        .join()
+        .map_err(|_| anyhow!("Hasher thread panicked"))?;
 
     let _ = reader_handle
         .join()

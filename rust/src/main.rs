@@ -4,6 +4,7 @@ mod hash;
 mod safety;
 mod stats;
 mod swab;
+mod uring;
 
 use anyhow::Result;
 

@@ -28,6 +28,23 @@ fn install_signal_handler(stats: Arc<Stats>) {
 #[cfg(not(unix))]
 fn install_signal_handler(_stats: Arc<Stats>) {}
 
+fn is_regular_file_or_new(path: &std::path::Path) -> bool {
+    if let Ok(metadata) = std::fs::metadata(path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileTypeExt;
+            let file_type = metadata.file_type();
+            file_type.is_file() && !file_type.is_block_device() && !file_type.is_char_device()
+        }
+        #[cfg(not(unix))]
+        {
+            metadata.is_file()
+        }
+    } else {
+        true
+    }
+}
+
 fn can_use_reflink(cfg: &Config) -> bool {
     if cfg.hash_algo != HashAlgo::None
         || cfg.swab
@@ -94,6 +111,9 @@ fn try_reflink_copy(
             chunk_size
         };
 
+        // SAFETY: `in_file` and `out_file` are valid open file descriptors verified
+        // by prior fstat check. Passing null for offset pointers directs the kernel
+        // to use and advance the current file offsets. `to_copy` is bounded to chunk_size.
         let ret = unsafe {
             libc::copy_file_range(
                 in_file.as_raw_fd(),
@@ -235,7 +255,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         let mut output_writer: Box<dyn Write> = if let Some(ref out_path) = cfg.output {
             let mut opts = OpenOptions::new();
             opts.write(true).create(true);
-            if !cfg.notrunc {
+            if !cfg.notrunc && is_regular_file_or_new(out_path) {
                 opts.truncate(true);
             }
             if cfg.direct {

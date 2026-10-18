@@ -18,6 +18,8 @@ impl AlignedBuffer {
         let layout = Layout::from_size_align(alloc_size, align)
             .expect("Invalid alignment layout specification");
 
+        // SAFETY: `layout` has non-zero size and valid power-of-two alignment.
+        // Null pointer return is explicitly checked and handled with `handle_alloc_error`.
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
             handle_alloc_error(layout);
@@ -48,6 +50,7 @@ impl Deref for AlignedBuffer {
 
     #[inline]
     fn deref(&self) -> &Self::Target {
+        // SAFETY: `self.ptr` is valid, non-null, aligned, and points to at least `self.capacity` bytes.
         unsafe { std::slice::from_raw_parts(self.ptr, self.capacity) }
     }
 }
@@ -55,19 +58,23 @@ impl Deref for AlignedBuffer {
 impl DerefMut for AlignedBuffer {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: `self.ptr` is valid, non-null, aligned, and uniquely borrowed for mutation.
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.capacity) }
     }
 }
 
 impl Drop for AlignedBuffer {
     fn drop(&mut self) {
+        // SAFETY: `self.ptr` was allocated with `self.layout` using `alloc_zeroed`, and is deallocated exactly once.
         unsafe {
             dealloc(self.ptr, self.layout);
         }
     }
 }
 
+// SAFETY: `AlignedBuffer` has exclusive ownership of its allocated memory buffer and can be safely sent across threads.
 unsafe impl Send for AlignedBuffer {}
+// SAFETY: Immutable access `&AlignedBuffer` only permits reading via `&[u8]`, ensuring thread safety.
 unsafe impl Sync for AlignedBuffer {}
 
 #[cfg(test)]

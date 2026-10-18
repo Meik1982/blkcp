@@ -53,6 +53,8 @@ pub fn execute_uring_transfer(
             .build()
             .user_data(1);
 
+        // SAFETY: `buf` is a valid heap buffer of `block_size` bytes. `ring.submit_and_wait(1)`
+        // synchronously awaits kernel completion before `buf` is reused or modified.
         unsafe {
             ring.submission()
                 .push(&read_e)
@@ -91,6 +93,8 @@ pub fn execute_uring_transfer(
             .build()
             .user_data(2);
 
+        // SAFETY: `buf` contains `bytes_read` valid bytes. Synchronous `submit_and_wait(1)`
+        // ensures the kernel completes writing before the next iteration begins.
         unsafe {
             ring.submission()
                 .push(&write_e)
@@ -202,6 +206,8 @@ pub fn execute_uring_sharded(
                         .build()
                         .user_data(1);
 
+                    // SAFETY: `buf` is thread-local and points to `block_size` bytes. `ring.submit_and_wait(1)`
+                    // blocks until the kernel read finishes.
                     unsafe {
                         ring.submission()
                             .push(&read_e)
@@ -235,6 +241,8 @@ pub fn execute_uring_sharded(
                         .build()
                         .user_data(2);
 
+                    // SAFETY: `buf` contains `nread` valid bytes. Synchronous waiting guarantees
+                    // no concurrent mutation of `buf` while the kernel writes.
                     unsafe {
                         ring.submission()
                             .push(&write_e)

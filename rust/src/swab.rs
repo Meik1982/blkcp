@@ -3,6 +3,7 @@ pub fn swab_buffer(buf: &mut [u8]) {
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
+            // SAFETY: `is_x86_feature_detected!("avx2")` dynamically guarantees AVX2 hardware support at runtime.
             unsafe {
                 swab_avx2(buf);
                 return;
@@ -34,6 +35,8 @@ unsafe fn swab_avx2(buf: &mut [u8]) {
 
     let (chunks_32, remainder) = buf.as_chunks_mut::<32>();
     for chunk in chunks_32 {
+        // SAFETY: `chunk` has an exact length of 32 bytes guaranteed by `as_chunks_mut::<32>()`.
+        // `_mm256_loadu_si256` and `_mm256_storeu_si256` are unaligned memory safe.
         let v = _mm256_loadu_si256(chunk.as_ptr() as *const __m256i);
         let swapped = _mm256_shuffle_epi8(v, mask);
         _mm256_storeu_si256(chunk.as_mut_ptr() as *mut __m256i, swapped);

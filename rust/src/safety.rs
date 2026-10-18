@@ -62,6 +62,25 @@ pub fn check_target_safety(output_path: &Path, force: bool) -> Result<()> {
                 ));
             }
         }
+
+        // Device-Mapper & Holder match (e.g. dm-0 holds nvme0n1p3 and is mounted on /)
+        let dev_name = path_str.trim_start_matches("/dev/");
+        let holders_path = format!("/sys/class/block/{}/holders", dev_name);
+        if let Ok(entries) = std::fs::read_dir(holders_path) {
+            for entry in entries.flatten() {
+                let holder_name = entry.file_name().to_string_lossy().to_string();
+                let holder_dev1 = format!("/dev/{}", holder_name);
+                let holder_dev2 = format!("/dev/mapper/{}", holder_name);
+                if mounted_dev == holder_dev1 || mounted_dev.starts_with(&holder_dev2) {
+                    return Err(anyhow!(
+                        "Target Safety Guard: Active device holder '{}' (LVM/LUKS) of '{}' is mounted on '{}'! Refusing destructive write without --force / -f.",
+                        holder_name,
+                        path_str,
+                        mount_point
+                    ));
+                }
+            }
+        }
     }
 
     Ok(())

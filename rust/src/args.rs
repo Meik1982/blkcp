@@ -108,7 +108,8 @@ pub fn parse_size(s: &str) -> Result<u64> {
 
     let multiplier: u64 = match suffix.to_lowercase().as_str() {
         "" => 1,
-        "c" | "b" => 1,
+        "c" => 1,
+        "b" => 512, // POSIX & GNU dd standard: 1 block = 512 bytes
         "k" | "kib" => 1024,
         "kb" => 1000,
         "m" | "mib" => 1024 * 1024,

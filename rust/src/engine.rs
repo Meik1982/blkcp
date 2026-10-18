@@ -3,11 +3,30 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::AsRawFd;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use crate::args::{Config, Engine, HashAlgo};
 use crate::hash::InFlightHasher;
 use crate::stats::Stats;
 use crate::swab::swab_buffer;
+
+#[cfg(unix)]
+fn install_signal_handler(stats: Arc<Stats>) {
+    use signal_hook::consts::signal::SIGUSR1;
+    use signal_hook::iterator::Signals;
+
+    std::thread::spawn(move || {
+        if let Ok(mut signals) = Signals::new([SIGUSR1]) {
+            for _ in signals.forever() {
+                stats.print_instant_telemetry();
+            }
+        }
+    });
+}
+
+#[cfg(not(unix))]
+fn install_signal_handler(_stats: Arc<Stats>) {}
 
 fn can_use_reflink(cfg: &Config) -> bool {
     if cfg.hash_algo != HashAlgo::None
@@ -32,7 +51,7 @@ fn try_reflink_copy(
     in_file: &mut File,
     out_file: &mut File,
     cfg: &Config,
-    stats: &mut Stats,
+    stats: &Stats,
 ) -> Result<bool> {
     use nix::sys::stat::{fstat, SFlag};
 
@@ -90,14 +109,18 @@ fn try_reflink_copy(
             break; // EOF
         } else if ret > 0 {
             let n = ret as usize;
-            stats.bytes_copied += n as u64;
-            stats.records_in_full += (n / cfg.block_size) as u64;
+            stats.add_bytes(n as u64);
+            stats
+                .records_in_full
+                .fetch_add((n / cfg.block_size) as u64, Ordering::Relaxed);
             if !n.is_multiple_of(cfg.block_size) {
-                stats.records_in_part += 1;
+                stats.inc_in_part();
             }
-            stats.records_out_full += (n / cfg.block_size) as u64;
+            stats
+                .records_out_full
+                .fetch_add((n / cfg.block_size) as u64, Ordering::Relaxed);
             if !n.is_multiple_of(cfg.block_size) {
-                stats.records_out_part += 1;
+                stats.inc_out_part();
             }
             if let Some(ref mut rem) = remaining {
                 *rem = rem.saturating_sub(n as u64);
@@ -108,7 +131,7 @@ fn try_reflink_copy(
             if raw_err == libc::EINTR {
                 continue;
             }
-            if stats.bytes_copied == 0
+            if stats.get_bytes() == 0
                 && (raw_err == libc::EXDEV
                     || raw_err == libc::EINVAL
                     || raw_err == libc::ENOSYS
@@ -134,7 +157,7 @@ fn try_reflink_copy(
     _in_file: &mut File,
     _out_file: &mut File,
     _cfg: &Config,
-    _stats: &mut Stats,
+    _stats: &Stats,
 ) -> Result<bool> {
     Ok(false) // Portable fallback
 }
@@ -145,7 +168,8 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         return Ok(());
     }
 
-    let mut stats = Stats::new();
+    let stats = Arc::new(Stats::new());
+    install_signal_handler(Arc::clone(&stats));
 
     // Fast-path: Kernel Zero-Copy Reflink
     if can_use_reflink(cfg) {
@@ -166,12 +190,13 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
                     let _ = out_f.seek(SeekFrom::Start(cfg.seek_bytes));
                 }
 
-                match try_reflink_copy(&mut in_f, &mut out_f, cfg, &mut stats) {
+                let stats_mut = Stats::new();
+                match try_reflink_copy(&mut in_f, &mut out_f, cfg, &stats_mut) {
                     Ok(true) => {
                         if cfg.fdatasync || cfg.fsync {
                             let _ = out_f.flush();
                         }
-                        stats.print_summary(cfg.quiet, cfg.json, None);
+                        stats_mut.print_summary(cfg.quiet, cfg.json, None);
                         return Ok(());
                     }
                     Ok(false) => {
@@ -230,13 +255,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             Box::new(std::io::stdout())
         };
 
-        execute_async_transfer(
-            input_reader,
-            &mut output_writer,
-            cfg,
-            &mut stats,
-            &mut hasher,
-        )?;
+        execute_async_transfer(input_reader, &mut output_writer, cfg, &stats, &mut hasher)?;
 
         if cfg.fdatasync || cfg.fsync {
             let _ = output_writer.flush();
@@ -268,7 +287,7 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             }
             let out_f = out_opts.open(out_path)?;
 
-            if let Ok(()) = crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &mut stats) {
+            if let Ok(()) = crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats) {
                 if cfg.fdatasync || cfg.fsync {
                     let _ = nix::unistd::fsync(out_f.as_raw_fd());
                 }
@@ -358,9 +377,9 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
         };
 
         if bytes_read == block_size {
-            stats.records_in_full += 1;
+            stats.inc_in_full();
         } else {
-            stats.records_in_part += 1;
+            stats.inc_in_part();
         }
 
         // Swab byte-swap if requested
@@ -385,12 +404,12 @@ pub fn execute_transfer(cfg: &Config) -> Result<()> {
             .map_err(|e| anyhow!("Write error: {}", e))?;
 
         if write_len == block_size {
-            stats.records_out_full += 1;
+            stats.inc_out_full();
         } else {
-            stats.records_out_part += 1;
+            stats.inc_out_part();
         }
 
-        stats.bytes_copied += bytes_read as u64;
+        stats.add_bytes(bytes_read as u64);
 
         if let Some(ref mut rem) = remaining_bytes {
             *rem = rem.saturating_sub(bytes_read as u64);
@@ -414,7 +433,7 @@ fn execute_async_transfer(
     mut input: Box<dyn Read + Send>,
     output: &mut Box<dyn Write>,
     cfg: &Config,
-    stats: &mut Stats,
+    stats: &Stats,
     hasher: &mut InFlightHasher,
 ) -> Result<()> {
     use std::sync::mpsc::sync_channel;
@@ -511,9 +530,9 @@ fn execute_async_transfer(
     // Stage 2: Writer Thread (Consumer & Dispatcher)
     while let Ok((mut buf, n)) = data_rx.recv() {
         if n == block_size {
-            stats.records_in_full += 1;
+            stats.inc_in_full();
         } else {
-            stats.records_in_part += 1;
+            stats.inc_in_part();
         }
 
         if cfg.swab {
@@ -532,12 +551,12 @@ fn execute_async_transfer(
             .map_err(|e| anyhow!("Write error in async pipeline: {}", e))?;
 
         if write_len == block_size {
-            stats.records_out_full += 1;
+            stats.inc_out_full();
         } else {
-            stats.records_out_part += 1;
+            stats.inc_out_part();
         }
 
-        stats.bytes_copied += n as u64;
+        stats.add_bytes(n as u64);
 
         if has_hash {
             let _ = hash_tx.send((buf, n));

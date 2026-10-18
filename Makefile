@@ -102,6 +102,7 @@ rust:
 	cargo build --release --manifest-path rust/Cargo.toml
 	@mkdir -p bin
 	cp -f rust/target/release/blkcp bin/blkcp-rs
+	cp -f rust/target/release/blkcp-tui bin/blkcp-tui-rs
 
 test-rust: rust
 	BLKCP_BIN="./bin/blkcp-rs" ./tests/run_tests.sh

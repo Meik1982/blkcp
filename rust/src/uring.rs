@@ -10,7 +10,7 @@ pub fn execute_uring_transfer(
     in_file: &File,
     out_file: &File,
     cfg: &Config,
-    stats: &mut Stats,
+    stats: &Stats,
 ) -> Result<()> {
     if cfg.threads > 1 {
         return execute_uring_sharded(in_file, out_file, cfg, stats);
@@ -80,9 +80,9 @@ pub fn execute_uring_transfer(
         in_offset += bytes_read as u64;
 
         if bytes_read == block_size {
-            stats.records_in_full += 1;
+            stats.inc_in_full();
         } else {
-            stats.records_in_part += 1;
+            stats.inc_in_part();
         }
 
         // Submit Write
@@ -112,12 +112,12 @@ pub fn execute_uring_transfer(
         out_offset += bytes_written as u64;
 
         if bytes_written == block_size {
-            stats.records_out_full += 1;
+            stats.inc_out_full();
         } else {
-            stats.records_out_part += 1;
+            stats.inc_out_part();
         }
 
-        stats.bytes_copied += bytes_read as u64;
+        stats.add_bytes(bytes_read as u64);
 
         if let Some(ref mut rem) = remaining {
             *rem = rem.saturating_sub(bytes_read as u64);
@@ -131,7 +131,7 @@ pub fn execute_uring_sharded(
     in_file: &File,
     out_file: &File,
     cfg: &Config,
-    stats: &mut Stats,
+    stats: &Stats,
 ) -> Result<()> {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Arc;
@@ -275,11 +275,21 @@ pub fn execute_uring_sharded(
         h.join().map_err(|_| anyhow!("Worker thread panicked"))??;
     }
 
-    stats.bytes_copied = bytes_copied.load(Ordering::Relaxed);
-    stats.records_in_full = records_full.load(Ordering::Relaxed);
-    stats.records_in_part = records_part.load(Ordering::Relaxed);
-    stats.records_out_full = stats.records_in_full;
-    stats.records_out_part = stats.records_in_part;
+    stats
+        .bytes_copied
+        .store(bytes_copied.load(Ordering::Relaxed), Ordering::Relaxed);
+    stats
+        .records_in_full
+        .store(records_full.load(Ordering::Relaxed), Ordering::Relaxed);
+    stats
+        .records_in_part
+        .store(records_part.load(Ordering::Relaxed), Ordering::Relaxed);
+    stats
+        .records_out_full
+        .store(records_full.load(Ordering::Relaxed), Ordering::Relaxed);
+    stats
+        .records_out_part
+        .store(records_part.load(Ordering::Relaxed), Ordering::Relaxed);
 
     Ok(())
 }

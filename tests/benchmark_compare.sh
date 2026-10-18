@@ -3,7 +3,7 @@
 set -euo pipefail
 export LC_ALL=C
 
-LOCAL_BLKCP="./blkcp"
+LOCAL_BLKCP="${BLKCP_BIN:-./blkcp}"
 SYSTEM_DD="/usr/bin/dd"
 
 if [[ ! -x "$LOCAL_BLKCP" ]]; then

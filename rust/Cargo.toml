@@ -1,0 +1,31 @@
+[package]
+name = "blkcp"
+version = "2.0.0-alpha.1"
+edition = "2021"
+authors = ["Meik Augenblick"]
+description = "Modern, high-performance, asynchronous Linux storage replication & cloning tool"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# Cryptographic Hashing Engines
+blks-core = { path = "../../blks/crates/blks-core" }
+blake3 = { version = "1.5", features = ["rayon", "mmap"] }
+sha2 = "0.10"
+
+# Linux Kernel Storage & Zero-Copy I/O
+io-uring = "0.7"
+nix = { version = "0.29", features = ["fs", "signal", "ioctl", "uio", "poll", "process", "term"] }
+libc = "0.2"
+
+# CLI & Concurrency
+clap = { version = "4.5", features = ["derive"] }
+signal-hook = "0.3"
+rayon = "1.10"
+anyhow = "1.0"
+memmap2 = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"

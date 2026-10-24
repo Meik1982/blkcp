@@ -35,13 +35,19 @@ pub fn execute_uring_transfer(
 
     if cfg.threads > 1 {
         let block_size = cfg.block_size.max(1);
+        let explicit_limit = cfg
+            .limit_bytes
+            .or_else(|| cfg.count.map(|cnt| cnt.saturating_mul(block_size as u64)));
+        let file_rem = in_file
+            .metadata()
+            .ok()
+            .map(|m| m.len().saturating_sub(cfg.skip_bytes))
+            .unwrap_or(0);
+        let effective_len = explicit_limit.map_or(file_rem, |lim| lim.min(file_rem));
+
         let can_parallel_blks = cfg.hash_algo == HashAlgo::Blks
             && block_size.is_multiple_of(blks_core::CHUNK_SIZE)
-            && in_file
-                .metadata()
-                .ok()
-                .map(|m| m.len().saturating_sub(cfg.skip_bytes) > blks_core::CHUNK_SIZE as u64)
-                .unwrap_or(false);
+            && effective_len > blks_core::CHUNK_SIZE as u64;
 
         if cfg.hash_algo != HashAlgo::None && !can_parallel_blks {
             if !cfg.quiet && !cfg.json {

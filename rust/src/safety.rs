@@ -45,8 +45,47 @@ fn collect_all_holders(dev_name: &str) -> HashSet<String> {
     holders
 }
 
-/// Evaluates whether the output target is a mounted system/block device.
-/// Returns `Some(detail)` if the target or one of its partitions/holders is mounted.
+fn check_device_relation(
+    active_dev: &str,
+    target_path_str: &str,
+    all_holders: &HashSet<String>,
+    usage_desc: &str,
+) -> Option<String> {
+    // 1. Direct device match
+    if active_dev == target_path_str {
+        return Some(format!(
+            "Target device '{}' is {}",
+            target_path_str, usage_desc
+        ));
+    }
+
+    // 2. Partition match on parent disk (e.g. target is /dev/sda and /dev/sda1 is active)
+    if let Some(suffix) = active_dev.strip_prefix(target_path_str) {
+        if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == 'p') {
+            return Some(format!(
+                "Partition '{}' of target device '{}' is {}",
+                active_dev, target_path_str, usage_desc
+            ));
+        }
+    }
+
+    // 3. Transitive Device-Mapper / LUKS / LVM / mdadm holder match
+    for holder_name in all_holders {
+        let holder_dev1 = format!("/dev/{}", holder_name);
+        let holder_dev2 = format!("/dev/mapper/{}", holder_name);
+        if active_dev == holder_dev1 || active_dev.starts_with(&holder_dev2) {
+            return Some(format!(
+                "Active device holder '{}' (LVM/LUKS) of '{}' is {}",
+                holder_name, target_path_str, usage_desc
+            ));
+        }
+    }
+
+    None
+}
+
+/// Evaluates whether the output target is a mounted system/block device or active swap.
+/// Returns `Some(detail)` if the target or one of its partitions/holders is mounted or active swap.
 pub fn detect_mounted_violation(output_path: &Path) -> Option<String> {
     let canonical = match output_path.canonicalize() {
         Ok(p) => p,
@@ -55,7 +94,7 @@ pub fn detect_mounted_violation(output_path: &Path) -> Option<String> {
 
     let path_str = canonical.to_string_lossy();
 
-    // Only block devices in /dev/ need mount protection
+    // Only block devices in /dev/ need mount/swap protection
     if !path_str.starts_with("/dev/") {
         return None;
     }
@@ -68,64 +107,73 @@ pub fn detect_mounted_violation(output_path: &Path) -> Option<String> {
     let dev_name = path_str.trim_start_matches("/dev/");
     let all_holders = collect_all_holders(dev_name);
 
-    let mounts_file = match File::open("/proc/mounts") {
-        Ok(f) => f,
-        Err(_) => return None,
-    };
-
-    let reader = BufReader::new(mounts_file);
-    for line in reader.lines().map_while(Result::ok) {
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() < 2 {
-            continue;
-        }
-
-        let raw_mounted_dev = parts[0];
-        let mount_point = parts[1];
-
-        // Resolve symlinks such as /dev/mapper/root -> /dev/dm-0
-        let canon_mounted = if raw_mounted_dev.starts_with("/dev/") {
-            Path::new(raw_mounted_dev)
-                .canonicalize()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-        } else {
-            None
-        };
-        let mounted_candidates: [&str; 2] = [
-            raw_mounted_dev,
-            canon_mounted.as_deref().unwrap_or(raw_mounted_dev),
-        ];
-
-        for mounted_dev in mounted_candidates {
-            // 1. Direct device match
-            if mounted_dev == path_str {
-                return Some(format!(
-                    "Target device '{}' is mounted on '{}'",
-                    path_str, mount_point
-                ));
+    // 1. Check /proc/mounts
+    if let Ok(mounts_file) = File::open("/proc/mounts") {
+        let reader = BufReader::new(mounts_file);
+        for line in reader.lines().map_while(Result::ok) {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                continue;
             }
 
-            // 2. Partition match on parent disk (e.g. target is /dev/sda and /dev/sda1 is mounted)
-            if mounted_dev.starts_with(path_str.as_ref()) {
-                let suffix = &mounted_dev[path_str.len()..];
-                if !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit() || c == 'p') {
-                    return Some(format!(
-                        "Partition '{}' of target device '{}' is mounted on '{}'",
-                        mounted_dev, path_str, mount_point
-                    ));
+            let raw_mounted_dev = parts[0];
+            let mount_point = parts[1];
+            let usage_desc = format!("mounted on '{}'", mount_point);
+
+            let canon_mounted = if raw_mounted_dev.starts_with("/dev/") {
+                Path::new(raw_mounted_dev)
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            } else {
+                None
+            };
+            let candidates: [&str; 2] = [
+                raw_mounted_dev,
+                canon_mounted.as_deref().unwrap_or(raw_mounted_dev),
+            ];
+
+            for cand in candidates {
+                if let Some(violation) =
+                    check_device_relation(cand, &path_str, &all_holders, &usage_desc)
+                {
+                    return Some(violation);
                 }
             }
+        }
+    }
 
-            // 3. Transitive Device-Mapper / LUKS / LVM / mdadm holder match
-            for holder_name in &all_holders {
-                let holder_dev1 = format!("/dev/{}", holder_name);
-                let holder_dev2 = format!("/dev/mapper/{}", holder_name);
-                if mounted_dev == holder_dev1 || mounted_dev.starts_with(&holder_dev2) {
-                    return Some(format!(
-                        "Active device holder '{}' (LVM/LUKS) of '{}' is mounted on '{}'",
-                        holder_name, path_str, mount_point
-                    ));
+    // 2. Check /proc/swaps for active system swap partitions/devices
+    if let Ok(swaps_file) = File::open("/proc/swaps") {
+        let reader = BufReader::new(swaps_file);
+        for (idx, line) in reader.lines().map_while(Result::ok).enumerate() {
+            if idx == 0 {
+                continue; // Skip header line
+            }
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            let raw_swap_dev = parts[0];
+            let usage_desc = "active system swap";
+
+            let canon_swap = if raw_swap_dev.starts_with("/dev/") {
+                Path::new(raw_swap_dev)
+                    .canonicalize()
+                    .ok()
+                    .map(|p| p.to_string_lossy().to_string())
+            } else {
+                None
+            };
+            let candidates: [&str; 2] =
+                [raw_swap_dev, canon_swap.as_deref().unwrap_or(raw_swap_dev)];
+
+            for cand in candidates {
+                if let Some(violation) =
+                    check_device_relation(cand, &path_str, &all_holders, usage_desc)
+                {
+                    return Some(violation);
                 }
             }
         }
@@ -158,5 +206,38 @@ mod tests {
         assert!(detect_mounted_violation(Path::new("/dev/null")).is_none());
         assert!(detect_mounted_violation(Path::new("/dev/zero")).is_none());
         assert!(check_target_safety(Path::new("/dev/null"), false).is_ok());
+    }
+
+    #[test]
+    fn test_device_relation_matching() {
+        let mut holders = HashSet::new();
+        holders.insert("dm-0".to_string());
+
+        // Direct match
+        assert!(
+            check_device_relation("/dev/nvme0n1", "/dev/nvme0n1", &holders, "mounted on '/'")
+                .is_some()
+        );
+
+        // Partition match on parent disk
+        assert!(check_device_relation(
+            "/dev/nvme0n1p2",
+            "/dev/nvme0n1",
+            &holders,
+            "active system swap"
+        )
+        .is_some());
+
+        // Transitive LUKS/LVM holder match
+        assert!(
+            check_device_relation("/dev/dm-0", "/dev/nvme0n1", &holders, "mounted on '/'")
+                .is_some()
+        );
+
+        // Unrelated disk must not match
+        assert!(
+            check_device_relation("/dev/sdb1", "/dev/nvme0n1", &holders, "mounted on '/mnt'")
+                .is_none()
+        );
     }
 }

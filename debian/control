@@ -5,8 +5,11 @@ Maintainer: Meik Augenblick <meik@github.com>
 Build-Depends: debhelper-compat (= 13),
                gcc,
                make,
+               cargo,
+               rustc,
                liburing-dev,
                libssl-dev,
+               libblake3-dev,
                libncurses-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/Meik1982/blkcp

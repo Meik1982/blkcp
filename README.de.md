@@ -16,7 +16,10 @@ Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch ent
 
 ---
 
-## 2. Modulare Architektur
+## 2. Modulare Dual-Architektur (Rust Primary & C11 Reference)
+
+* **Haupt-Binaries (`blkcp`, `blkcp-tui` in `rust/`):** Speichersicherer Rust-2021-Core & modulare 16-Modul-Ratatui-TUI (`tui_state.rs`, `tui_render.rs`, `tui_main.rs`) mit nativem Multi-Ring `io_uring`, `crossbeam-channel` Ringpuffer, `CachePadded` Telemetrie und parallelem BLKS-384 Merkle Combiner.
+* **Referenz-Binaries (`blkcp-c`, `blkcp-tui-c` in `src/`):** Schlanke C11- und `ncursesw`-Referenzimplementierung bei 100 % CLI- und Test-Parität (42/42 Regressionstests).
 
 Der historische Monolith wurde vollständig in getrennte, wartbare Subsysteme zerlegt:
 

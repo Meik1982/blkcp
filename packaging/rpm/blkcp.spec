@@ -10,8 +10,11 @@ Source0:        https://github.com/Meik1982/blkcp/archive/refs/tags/v%{version}.
 
 BuildRequires:  gcc
 BuildRequires:  make
+BuildRequires:  cargo
+BuildRequires:  rust
 BuildRequires:  liburing-devel
 BuildRequires:  openssl-devel
+BuildRequires:  libblake3-devel
 BuildRequires:  ncurses-devel
 
 Requires:       liburing
@@ -38,6 +41,8 @@ reflink CoW, splice, sync), Target Safety Guard, and an interactive 2D spatial T
 %doc README.md
 %{_bindir}/blkcp
 %{_bindir}/blkcp-tui
+%{_bindir}/blkcp-c
+%{_bindir}/blkcp-tui-c
 %{_mandir}/man1/blkcp.1*
 %{_datadir}/bash-completion/completions/blkcp
 %{_datadir}/zsh/site-functions/_blkcp

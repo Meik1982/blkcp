@@ -2,13 +2,16 @@
 
 [![CI](https://github.com/Meik1982/blkcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Meik1982/blkcp/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Language: C11](https://img.shields.io/badge/Language-C11-00599C.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
+[![Language: Rust & C11](https://img.shields.io/badge/Language-Rust_%26_C11-DEA584.svg)](https://www.rust-lang.org)
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-FCC624.svg)](https://kernel.org)
 [![German Docs](https://img.shields.io/badge/Docs-Deutsch-red.svg)](README.de.md)
 
 **`blkcp`** is a ground-up reimagining and modern modularization of the historical `dd` utility, engineered specifically for high-performance Linux storage, NVMe throughput, CoW filesystems, and human safety.
 
-It completely eliminates legacy 1970s `key=value` syntax (`if=`, `of=`, `ibs=`, `obs=`), introduces a unified I/O driver abstraction (`io_uring`, `reflink`, `splice`, `async`, `sync`), embeds a **Target Safety Guard** to prevent destroying mounted systems and swap devices, and features an interactive **2D-Spatial Terminal User Interface (`blkcp-tui`)**.
+It completely eliminates legacy 1970s `key=value` syntax (`if=`, `of=`, `ibs=`, `obs=`), introduces a unified I/O driver abstraction (`io_uring`, `reflink`, `splice`, `async`, `sync`), embeds a **Target Safety Guard** to prevent destroying mounted systems, LUKS/LVM holders, and swap devices, and features an interactive **2D-Spatial Terminal User Interface (`blkcp-tui`)**.
+
+* **Primary Binaries (`blkcp`, `blkcp-tui`):** Memory-safe Rust 2021 Core & 16-Module Ratatui TUI with Multi-Ring `io_uring` Sharding, `CachePadded` lock-free telemetry, and Post-Quantum **BLKS-384** Merkle Combiner.
+* **Reference Binaries (`blkcp-c`, `blkcp-tui-c`):** Ultra-compact C11 & `ncursesw` reference implementation maintained side-by-side with 100% test parity.
 
 ---
 

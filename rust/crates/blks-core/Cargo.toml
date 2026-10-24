@@ -1,0 +1,15 @@
+[package]
+name = "blks-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Meik Augenblick"]
+license = "LGPL-3.0-or-later"
+description = "High-Performance 384-Bit Cryptographic Tree-Hash Engine (LGPLv3)"
+
+[lib]
+name = "blks_core"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+rayon = "1.10"
+memmap2 = "0.9"

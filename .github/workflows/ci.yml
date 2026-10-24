@@ -17,18 +17,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Release (-O3, -flto)
+          - name: Release (Rust blkcp & C11 blkcp-c)
             build_cmd: make release
-            cflags: ""
-            ldflags: ""
-          - name: AddressSanitizer & UndefinedBehaviorSanitizer
-            build_cmd: make CFLAGS="-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=address,undefined"
-            cflags: "-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP"
-            ldflags: "-fsanitize=address,undefined"
-          - name: ThreadSanitizer
-            build_cmd: make CFLAGS="-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=thread"
-            cflags: "-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP"
-            ldflags: "-fsanitize=thread"
+            test_cmd: make test && make test-c
+            verify_bin: ./blkcp
+          - name: C11 AddressSanitizer & UndefinedBehaviorSanitizer
+            build_cmd: make CFLAGS="-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=address,undefined" c-bins
+            test_cmd: make test-c
+            verify_bin: ./blkcp-c
+          - name: C11 ThreadSanitizer
+            build_cmd: make CFLAGS="-fsanitize=thread -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=thread" c-bins
+            test_cmd: make test-c
+            verify_bin: ./blkcp-c
 
     steps:
       - name: Check out repository
@@ -37,18 +37,18 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential liburing-dev libssl-dev libncurses-dev
+          sudo apt-get install -y build-essential liburing-dev libssl-dev libblake3-dev libncurses-dev
 
       - name: Compile blkcp and blkcp-tui
         run: ${{ matrix.build_cmd }}
 
-      - name: Run test suite (33 tests)
-        run: ./tests/run_tests.sh
+      - name: Run 42-test regression suite
+        run: ${{ matrix.test_cmd }}
 
       - name: Verify CLI options & version output
         run: |
-          ./blkcp --version
-          ./blkcp --help
+          ${{ matrix.verify_bin }} --version
+          ${{ matrix.verify_bin }} --help
 
   package-deb:
     name: Build Debian/Ubuntu Package (.deb)
@@ -61,7 +61,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
+          sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libblake3-dev libncurses-dev dpkg-dev cargo rustc
 
       - name: Build Debian Package
         run: |
@@ -92,7 +92,7 @@ jobs:
     needs: build-and-test
     steps:
       - name: Install git and tar
-        run: dnf install -y git tar rpm-build gcc make liburing-devel openssl-devel ncurses-devel gh
+        run: dnf install -y git tar rpm-build gcc make cargo rust liburing-devel openssl-devel libblake3-devel ncurses-devel gh
 
       - name: Check out repository
         uses: actions/checkout@v4

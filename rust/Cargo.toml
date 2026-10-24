@@ -1,6 +1,9 @@
+[workspace]
+members = [".", "crates/blks-core"]
+
 [package]
 name = "blkcp"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 edition = "2021"
 authors = ["Meik Augenblick"]
 description = "Modern, high-performance, asynchronous Linux storage replication & cloning tool"
@@ -8,7 +11,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 # Cryptographic Hashing Engines
-blks-core = { path = "../../blks/crates/blks-core" }
+blks-core = { path = "crates/blks-core" }
 blake3 = { version = "1.5", features = ["rayon", "mmap"] }
 sha2 = { version = "0.10", features = ["asm"] }
 libc = "0.2"

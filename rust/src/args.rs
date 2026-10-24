@@ -139,7 +139,7 @@ pub fn parse_args() -> Result<Config> {
             print_help();
             std::process::exit(0);
         } else if arg == "-v" || arg == "--version" {
-            println!("blkcp 2.0.0-alpha.1 (Rust Core)");
+            println!("blkcp 2.0.0 (Rust Core)");
             println!("Copyright (C) 2026 Meik Augenblick");
             std::process::exit(0);
         } else if arg == "-i" || arg == "--input" {

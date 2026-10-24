@@ -14,7 +14,6 @@ BuildRequires:  cargo
 BuildRequires:  rust
 BuildRequires:  liburing-devel
 BuildRequires:  openssl-devel
-BuildRequires:  libblake3-devel
 BuildRequires:  ncurses-devel
 
 Requires:       liburing

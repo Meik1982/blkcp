@@ -50,7 +50,7 @@ Dieses Dokument definiert das formale Open-Source-Software (OSS) Sicherheits- un
 | `tree.rs` | **1** | Laufzeitgeprüfter `is_x86_feature_detected!("avx2")`-Aufruf von `hash_4_chunks_avx2`. |
 | `simd_avx2.rs` | **2** | Reine Register-basierte AVX2 4-Wege-ARX-Runden (`#[target_feature(enable = "avx2")]`); null Rohzeiger-Casts. |
 | `lib.rs` | **2** | Read-Only `Mmap::map(&file)` auf geprüften regulären Dateien sowie AVX2-Unit-Test. |
-| `ffi.rs` | **5** | C-ABI-Funktionen (`blks_hash_*`), Null-Pointer- und Längen-geprüft, gekapselt in `catch_unwind`. |
+| `ffi.rs` | **8** | C-ABI-Funktionen (`blks_hash_*` & `blake3_hasher_*`), Null-Pointer-, Alignment- und Längen-geprüft, gekapselt in `catch_unwind`. |
 
 ---
 

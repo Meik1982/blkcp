@@ -13,3 +13,4 @@ crate-type = ["lib", "staticlib", "cdylib"]
 [dependencies]
 rayon = "1.10"
 memmap2 = "0.9"
+blake3 = "1.5"

@@ -148,3 +148,76 @@ pub unsafe extern "C" fn blks_digest_to_base64(
         -1
     }
 }
+
+// Compile-time verification that Rust `blake3::Hasher` fits inside C `blake3_hasher` (1920 bytes, align 8)
+const _: () = assert!(std::mem::size_of::<blake3::Hasher>() <= 1920);
+const _: () = assert!(std::mem::align_of::<blake3::Hasher>() <= 8);
+
+/// Initialize a C `blake3_hasher` struct in-place using the SIMD-accelerated Rust `blake3::Hasher`.
+///
+/// # Safety
+/// - `self_ptr` must be a non-null, 8-byte aligned pointer to a writable `blake3_hasher` (1912 bytes).
+#[no_mangle]
+pub unsafe extern "C" fn blake3_hasher_init(self_ptr: *mut u64) {
+    if self_ptr.is_null() {
+        return;
+    }
+    let _ = catch_unwind(|| {
+        // SAFETY: `self_ptr` points to a valid, 8-byte aligned `blake3_hasher` struct of 1920 bytes.
+        unsafe {
+            std::ptr::write(self_ptr.cast::<blake3::Hasher>(), blake3::Hasher::new());
+        }
+    });
+}
+
+/// Feed data into an initialized C `blake3_hasher` struct.
+///
+/// # Safety
+/// - `self_ptr` must point to a `blake3_hasher` previously initialized via `blake3_hasher_init`.
+/// - `input` must point to at least `input_len` readable bytes (if `input_len > 0`).
+#[no_mangle]
+pub unsafe extern "C" fn blake3_hasher_update(
+    self_ptr: *mut u64,
+    input: *const u8,
+    input_len: usize,
+) {
+    if self_ptr.is_null() || (input.is_null() && input_len > 0) {
+        return;
+    }
+    let _ = catch_unwind(|| {
+        // SAFETY: `self_ptr` was initialized by `blake3_hasher_init` and `input` is valid for `input_len`.
+        unsafe {
+            let hasher = &mut *self_ptr.cast::<blake3::Hasher>();
+            let slice = if input_len == 0 {
+                &[]
+            } else {
+                slice::from_raw_parts(input, input_len)
+            };
+            hasher.update(slice);
+        }
+    });
+}
+
+/// Finalize a C `blake3_hasher` struct and write `out_len` digest bytes into `out`.
+///
+/// # Safety
+/// - `self_ptr` must point to a `blake3_hasher` previously initialized via `blake3_hasher_init`.
+/// - `out` must point to at least `out_len` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn blake3_hasher_finalize(
+    self_ptr: *const u64,
+    out: *mut u8,
+    out_len: usize,
+) {
+    if self_ptr.is_null() || out.is_null() || out_len == 0 {
+        return;
+    }
+    let _ = catch_unwind(|| {
+        // SAFETY: `self_ptr` was initialized by `blake3_hasher_init` and `out` is valid for `out_len`.
+        unsafe {
+            let hasher = &*self_ptr.cast::<blake3::Hasher>();
+            let out_slice = slice::from_raw_parts_mut(out, out_len);
+            hasher.finalize_xof().fill(out_slice);
+        }
+    });
+}

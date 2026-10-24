@@ -2,7 +2,7 @@ CC ?= gcc
 CARGO ?= cargo
 CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
 LDFLAGS ?= -pie -Wl,-z,relro,-z,now,-z,defs
-LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring -lblake3
+LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring
 
 # BLKS 384-Bit Post-Quantum Tree-Hash Library (built in-tree via rust/crates/blks-core or external)
 LOCAL_BLKS_LIB = rust/target/release/libblks_core.a

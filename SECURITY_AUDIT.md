@@ -50,7 +50,7 @@ This document defines the formal Open-Source Software (OSS) Security & Soundness
 | `tree.rs` | **1** | Runtime-gated `is_x86_feature_detected!("avx2")` dispatch to `hash_4_chunks_avx2`. |
 | `simd_avx2.rs` | **2** | Pure register-level AVX2 4-way ARX rounds (`#[target_feature(enable = "avx2")]`); zero raw pointer casts. |
 | `lib.rs` | **2** | Read-only `Mmap::map(&file)` on verified regular files and AVX2 unit-test parity check. |
-| `ffi.rs` | **5** | C-ABI entrypoints (`blks_hash_*`), null-checked, length-checked, and wrapped in `catch_unwind`. |
+| `ffi.rs` | **8** | C-ABI entrypoints (`blks_hash_*` & `blake3_hasher_*`), null-checked, 8-byte alignment-verified, and wrapped in `catch_unwind`. |
 
 ---
 

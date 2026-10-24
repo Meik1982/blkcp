@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential liburing-dev libssl-dev libblake3-dev libncurses-dev
+          sudo apt-get install -y build-essential liburing-dev libssl-dev libncurses-dev
 
       - name: Compile blkcp and blkcp-tui
         run: ${{ matrix.build_cmd }}
@@ -61,7 +61,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libblake3-dev libncurses-dev dpkg-dev cargo rustc
+          sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
 
       - name: Build Debian Package
         run: |
@@ -75,15 +75,16 @@ jobs:
           name: blkcp-deb
           path: dist/*.deb
 
-      - name: Attach .deb to Release (if release exists)
+      - name: Create or Update GitHub Release & Attach Artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(grep -m1 '^Version:' packaging/rpm/blkcp.spec | awk '{print $2}')
           TAG="v${VERSION}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.deb --clobber
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "blkcp ${TAG}: Memory-Safe Rust Core, 16-Module Ratatui TUI & Post-Quantum BLKS-384" --generate-notes
           fi
+          gh release upload "$TAG" dist/*.deb bin/blkcp bin/blkcp-tui bin/blkcp-c bin/blkcp-tui-c --clobber
 
   package-rpm:
     name: Build Fedora/RHEL Package (.rpm)
@@ -92,7 +93,7 @@ jobs:
     needs: build-and-test
     steps:
       - name: Install git and tar
-        run: dnf install -y git tar rpm-build gcc make cargo rust liburing-devel openssl-devel libblake3-devel ncurses-devel gh
+        run: dnf install -y git tar rpm-build gcc make cargo rust liburing-devel openssl-devel ncurses-devel gh
 
       - name: Check out repository
         uses: actions/checkout@v4
@@ -115,12 +116,13 @@ jobs:
           name: blkcp-rpm
           path: dist/*.rpm
 
-      - name: Attach .rpm to Release (if release exists)
+      - name: Attach .rpm to Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(grep -m1 '^Version:' packaging/rpm/blkcp.spec | awk '{print $2}')
           TAG="v${VERSION}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.rpm --clobber
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "blkcp ${TAG}: Memory-Safe Rust Core, 16-Module Ratatui TUI & Post-Quantum BLKS-384" --generate-notes
           fi
+          gh release upload "$TAG" dist/*.rpm --clobber

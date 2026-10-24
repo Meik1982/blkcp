@@ -10,7 +10,7 @@ license = "GPL-3.0-or-later"
 # Cryptographic Hashing Engines
 blks-core = { path = "../../blks/crates/blks-core" }
 blake3 = { version = "1.5", features = ["rayon", "mmap"] }
-sha2 = "0.10"
+sha2 = { version = "0.10", features = ["asm"] }
 libc = "0.2"
 
 # CLI & Concurrency

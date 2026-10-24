@@ -65,9 +65,11 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **High-Speed In-Flight BLKS-384 Post-Quantum Tree-Hash Checksumming (`--hash=blks`, `--blks`):**
   Direkte C-FFI-Integration der `blks`-Bibliothek (`include/blks.h` und statisches `libblks_core.a`). Berechnet 384-Bit-Prüfsummen in sauberen 64-Zeichen Base64 ohne Padding mit 192 Bit Post-Quantum-Kollisionsresistenz in-flight während des Transfers für alle Treiber (`sync`, `async`, `uring`). Inklusive vollständiger NDJSON-Telemetrie (`--json`), CLI-Shortcuts, Shell-Completions (Bash/Zsh/Fish), Manpage-Aktualisierung und Regressionstest 42 (42/42 Tests grün, ASan/UBSan-verifiziert).
 - [x] **Paralleler Rust-Core & Ratatui TUI (`rust/`, Branch `feature/rust-core`):**
-  - 100 % Feature- und CLI-Parität zum C-Referenzkern (42/42 Regressionstests grün gegen `rust/target/release/blkcp`, 7/7 Rust-Unit-Tests grün, 0 Clippy-Warnungen).
+  - 100 % Feature- und CLI-Parität zum C-Referenzkern (42/42 Regressionstests grün gegen `rust/target/release/blkcp`, 8/8 Rust-Unit-Tests grün, 0 Clippy-Warnungen).
   - Vollständige 16-Modul-Matrix in `blkcp-tui` (`ratatui` + `crossterm`) mit interaktivem File-Browser, Dry-Run-Modal, Safety-Guard-Bestätigung und Live-Transfer-Runner.
   - Echter Linux `splice(2)`-Treiber, `copy_file_range(2)` Reflink, `posix_fadvise(..., DONTNEED)` für `--nocache`, 4-KiB-aligned `AlignedBuffer` für `O_DIRECT` über alle Treiber (`sync`, `async`, `uring`) und Multi-Ring `io_uring` Sharding (`-j N`).
+  - Native `io_uring` In-Flight Checksumming-Integration (`--blake3`: **1,15 GB/s (+22,8 % vs C)**, `--blks`: **0,92 GB/s (+18,1 % vs C)**) sowie vollständige Sharding-Checksumming-Parität mit `-j N --hash`.
+  - Mathematischer Formalbeweis und verifizierter Inter-Chunk Merkle Combiner für BLKS-384 Subtree-Reduktion in `rust/src/hash.rs`.
   - Gehärteter Target Safety Guard (`rust/src/safety.rs`) gegen `/proc/mounts`, `/proc/swaps` und rekursive `/sys/class/block/<dev>/holders` (LUKS/LVM/mdadm) sowie Schutz vor `O_TRUNC` auf Blockgeräten.
   - Exakt **16 `unsafe`-Segmente** im gesamten Rust-Code (`aligned.rs`: 6, `engine.rs`: 4, `swab.rs`: 2, `uring.rs`: 4), alle auf Hardware-SIMD, Page-Aligned Allocator, Kernel-Zero-Copy-Syscalls und `io_uring`-SQEs beschränkt und zu **100 % mit `// SAFETY:`-Invarianten dokumentiert**.
 

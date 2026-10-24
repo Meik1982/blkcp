@@ -664,7 +664,6 @@ pub fn execute_transfer_with_control(
     // 4. io_uring native execution (Linux only, when input & output are seekable files/devices and no in-flight transform is active)
     #[cfg(target_os = "linux")]
     if (cfg.engine == Engine::Uring || (cfg.threads > 1 && cfg.engine == Engine::Auto))
-        && cfg.hash_algo == HashAlgo::None
         && !cfg.swab
         && !cfg.sparse
         && !cfg.sync
@@ -674,8 +673,8 @@ pub fn execute_transfer_with_control(
                 let in_f = open_input_file(in_path, cfg.direct)?;
                 let out_f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
 
-                if crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats, &cancel_flag)
-                    .is_ok()
+                if let Ok(hash_res) =
+                    crate::uring::execute_uring_transfer(&in_f, &out_f, cfg, &stats, &cancel_flag)
                 {
                     if cfg.nocache {
                         evict_page_cache(&in_f);
@@ -686,7 +685,7 @@ pub fn execute_transfer_with_control(
                     } else if cfg.fsync {
                         let _ = out_f.sync_all();
                     }
-                    return Ok(None);
+                    return Ok(hash_res);
                 }
             }
         }

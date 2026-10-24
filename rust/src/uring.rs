@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::aligned::AlignedBuffer;
-use crate::args::Config;
+use crate::args::{Config, HashAlgo};
+use crate::hash::InFlightHasher;
 use crate::stats::Stats;
 
 pub fn execute_uring_transfer(
@@ -15,11 +16,33 @@ pub fn execute_uring_transfer(
     cfg: &Config,
     stats: &Stats,
     cancel_flag: &Arc<AtomicBool>,
-) -> Result<()> {
+) -> Result<Option<(String, &'static str)>> {
+    let mut hasher = InFlightHasher::new(cfg.hash_algo);
+
     if cfg.threads > 1 {
-        return execute_uring_sharded(in_file, out_file, cfg, stats, cancel_flag);
+        if cfg.hash_algo != HashAlgo::None {
+            if !cfg.quiet && !cfg.json {
+                eprintln!("blkcp: io_uring: in-flight checksum requires sequential stream; falling back to single-ring mode");
+            }
+            execute_uring_single(in_file, out_file, cfg, stats, cancel_flag, &mut hasher)?;
+            return Ok(hasher.finalize_string());
+        }
+        execute_uring_sharded(in_file, out_file, cfg, stats, cancel_flag)?;
+        return Ok(None);
     }
 
+    execute_uring_single(in_file, out_file, cfg, stats, cancel_flag, &mut hasher)?;
+    Ok(hasher.finalize_string())
+}
+
+fn execute_uring_single(
+    in_file: &File,
+    out_file: &File,
+    cfg: &Config,
+    stats: &Stats,
+    cancel_flag: &Arc<AtomicBool>,
+    hasher: &mut InFlightHasher,
+) -> Result<()> {
     let queue_depth = cfg.queue_depth.unwrap_or(64).clamp(8, 256) as u32;
     let mut ring =
         IoUring::new(queue_depth).map_err(|e| anyhow!("Failed to initialize io_uring: {}", e))?;
@@ -87,6 +110,7 @@ pub fn execute_uring_transfer(
 
         let bytes_read = res as usize;
         in_offset += bytes_read as u64;
+        hasher.update(&buf[..bytes_read]);
 
         if bytes_read == block_size {
             stats.inc_in_full();

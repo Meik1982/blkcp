@@ -10,6 +10,20 @@ use crate::args::{Config, HashAlgo};
 use crate::hash::InFlightHasher;
 use crate::stats::Stats;
 
+/// Safely enqueues a submission queue entry into the ring.
+///
+/// Encapsulates the `io_uring` crate's unsafe `push` method.
+#[inline]
+fn push_sqe(ring: &mut IoUring, entry: &io_uring::squeue::Entry) -> Result<()> {
+    // SAFETY: The entry references memory buffers that are pinned, thread-local, and guaranteed
+    // to outlive the synchronous completion cycle awaited via `ring.submit_and_wait(1)`.
+    unsafe {
+        ring.submission()
+            .push(entry)
+            .map_err(|_| anyhow!("io_uring submission queue full"))
+    }
+}
+
 pub fn execute_uring_transfer(
     in_file: &File,
     out_file: &File,
@@ -83,13 +97,7 @@ fn execute_uring_single(
             .build()
             .user_data(1);
 
-        // SAFETY: `buf` is a 4096-byte aligned buffer of `block_size` bytes. `ring.submit_and_wait(1)`
-        // synchronously awaits kernel completion before `buf` is reused or modified.
-        unsafe {
-            ring.submission()
-                .push(&read_e)
-                .map_err(|_| anyhow!("io_uring submission queue full"))?;
-        }
+        push_sqe(&mut ring, &read_e)?;
         ring.submit_and_wait(1)?;
 
         let cqe = ring
@@ -128,13 +136,7 @@ fn execute_uring_single(
                 .build()
                 .user_data(2);
 
-            // SAFETY: `write_ptr` points to `rem_write` valid bytes inside `buf`. Synchronous
-            // `submit_and_wait(1)` ensures the kernel completes writing before the next iteration.
-            unsafe {
-                ring.submission()
-                    .push(&write_e)
-                    .map_err(|_| anyhow!("io_uring submission queue full"))?;
-            }
+            push_sqe(&mut ring, &write_e)?;
             ring.submit_and_wait(1)?;
 
             let cqe = ring
@@ -254,13 +256,7 @@ pub fn execute_uring_sharded(
                             .build()
                             .user_data(1);
 
-                        // SAFETY: `buf` is thread-local, 4096-byte aligned, and points to `block_size` bytes.
-                        // `ring.submit_and_wait(1)` blocks until the kernel read finishes.
-                        unsafe {
-                            ring.submission()
-                                .push(&read_e)
-                                .map_err(|_| anyhow!("io_uring SQ full"))?;
-                        }
+                        push_sqe(&mut ring, &read_e)?;
                         ring.submit_and_wait(1)?;
 
                         let cqe = ring
@@ -293,13 +289,7 @@ pub fn execute_uring_sharded(
                                 .build()
                                 .user_data(2);
 
-                            // SAFETY: `w_ptr` points to `rem_w` valid bytes inside `buf`. Synchronous waiting
-                            // guarantees no concurrent mutation of `buf` while the kernel writes.
-                            unsafe {
-                                ring.submission()
-                                    .push(&write_e)
-                                    .map_err(|_| anyhow!("io_uring SQ full"))?;
-                            }
+                            push_sqe(&mut ring, &write_e)?;
                             ring.submit_and_wait(1)?;
 
                             let cqe = ring

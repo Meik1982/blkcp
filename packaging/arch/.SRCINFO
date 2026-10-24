@@ -13,8 +13,7 @@ pkgbase = blkcp
 	depends = liburing
 	depends = openssl
 	depends = ncurses
-	depends = libblake3
 	source = blkcp-2.0.0.tar.gz::https://github.com/Meik1982/blkcp/archive/refs/tags/v2.0.0.tar.gz
-	sha256sums = SKIP
+	sha256sums = 4eda83a63b6bca0cb04cef361882a362022fdf92880ed07baa89930ad1dbd7ff
 
 pkgname = blkcp

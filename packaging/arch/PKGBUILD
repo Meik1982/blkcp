@@ -6,10 +6,10 @@ pkgdesc="Next-Gen High-Performance Block Copy Tool for Linux (io_uring, Reflink 
 arch=('x86_64')
 url="https://github.com/Meik1982/blkcp"
 license=('GPL-3.0-or-later')
-depends=('glibc' 'liburing' 'openssl' 'ncurses' 'libblake3')
+depends=('glibc' 'liburing' 'openssl' 'ncurses')
 makedepends=('git' 'gcc' 'make' 'cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Meik1982/blkcp/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('7d6dc3b340bcdd1855c517d907e32e9ca17449917f2e0972ec9e73a6f0ff8d5c')
+sha256sums=('4eda83a63b6bca0cb04cef361882a362022fdf92880ed07baa89930ad1dbd7ff')
 
 build() {
   cd "$srcdir/$pkgname-$pkgver"

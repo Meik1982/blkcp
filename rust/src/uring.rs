@@ -34,15 +34,23 @@ pub fn execute_uring_transfer(
     let mut hasher = InFlightHasher::new(cfg.hash_algo);
 
     if cfg.threads > 1 {
-        if cfg.hash_algo != HashAlgo::None {
+        let block_size = cfg.block_size.max(1);
+        let can_parallel_blks = cfg.hash_algo == HashAlgo::Blks
+            && block_size.is_multiple_of(blks_core::CHUNK_SIZE)
+            && in_file
+                .metadata()
+                .ok()
+                .map(|m| m.len().saturating_sub(cfg.skip_bytes) > blks_core::CHUNK_SIZE as u64)
+                .unwrap_or(false);
+
+        if cfg.hash_algo != HashAlgo::None && !can_parallel_blks {
             if !cfg.quiet && !cfg.json {
                 eprintln!("blkcp: io_uring: in-flight checksum requires sequential stream; falling back to single-ring mode");
             }
             execute_uring_single(in_file, out_file, cfg, stats, cancel_flag, &mut hasher)?;
             return Ok(hasher.finalize_string());
         }
-        execute_uring_sharded(in_file, out_file, cfg, stats, cancel_flag)?;
-        return Ok(None);
+        return execute_uring_sharded(in_file, out_file, cfg, stats, cancel_flag);
     }
 
     execute_uring_single(in_file, out_file, cfg, stats, cancel_flag, &mut hasher)?;
@@ -179,9 +187,10 @@ pub fn execute_uring_sharded(
     cfg: &Config,
     stats: &Stats,
     cancel_flag: &Arc<AtomicBool>,
-) -> Result<()> {
+) -> Result<Option<(String, &'static str)>> {
     let num_workers = cfg.threads.clamp(2, 64);
     let chunk_size = (64 * 1024 * 1024u64).max(cfg.block_size as u64); // 64 MiB stripes
+    let compute_blks = cfg.hash_algo == HashAlgo::Blks;
 
     let block_size = cfg.block_size.max(1);
     let in_start_offset = cfg.skip_bytes;
@@ -205,7 +214,7 @@ pub fn execute_uring_sharded(
     let in_fd_val = in_file.as_raw_fd();
     let out_fd_val = out_file.as_raw_fd();
 
-    std::thread::scope(|s| -> Result<()> {
+    let all_stripes = std::thread::scope(|s| -> Result<Vec<(u64, Vec<[u8; 48]>)>> {
         let mut handles = Vec::with_capacity(num_workers);
 
         for _ in 0..num_workers {
@@ -213,7 +222,7 @@ pub fn execute_uring_sharded(
             let abort_flag_ref = &abort_flag;
             let user_cancel = cancel_flag.as_ref();
 
-            let handle = s.spawn(move || -> Result<()> {
+            let handle = s.spawn(move || -> Result<Vec<(u64, Vec<[u8; 48]>)>> {
                 let mut ring =
                     IoUring::new(32).map_err(|e| anyhow!("io_uring worker init failed: {}", e))?;
                 let in_fd = types::Fd(in_fd_val);
@@ -221,6 +230,7 @@ pub fn execute_uring_sharded(
 
                 // 4096-byte page-aligned buffer per worker shard
                 let mut buf = AlignedBuffer::new(block_size, 4096);
+                let mut worker_stripes: Vec<(u64, Vec<[u8; 48]>)> = Vec::new();
 
                 loop {
                     if abort_flag_ref.load(Ordering::Relaxed) || user_cancel.load(Ordering::Relaxed)
@@ -239,6 +249,14 @@ pub fn execute_uring_sharded(
                         (total - cur_chunk_base).min(chunk_size)
                     } else {
                         chunk_size
+                    };
+
+                    let mut stripe_leaves = if compute_blks {
+                        Vec::with_capacity(
+                            (this_chunk_len as usize).div_ceil(blks_core::CHUNK_SIZE),
+                        )
+                    } else {
+                        Vec::new()
                     };
 
                     let mut chunk_done = 0u64;
@@ -268,7 +286,10 @@ pub fn execute_uring_sharded(
                         if res == 0 {
                             // EOF
                             abort_flag_ref.store(true, Ordering::Relaxed);
-                            return Ok(());
+                            if compute_blks && !stripe_leaves.is_empty() {
+                                worker_stripes.push((cur_chunk_base, stripe_leaves));
+                            }
+                            return Ok(worker_stripes);
                         } else if res < 0 {
                             let err = -res;
                             if err == libc::EINTR {
@@ -279,6 +300,11 @@ pub fn execute_uring_sharded(
                         }
 
                         let nread = res as usize;
+                        if compute_blks {
+                            for leaf_slice in buf[..nread].chunks(blks_core::CHUNK_SIZE) {
+                                stripe_leaves.push(blks_core::tree::hash_chunk(leaf_slice, false));
+                            }
+                        }
 
                         let mut written = 0usize;
                         while written < nread {
@@ -320,19 +346,38 @@ pub fn execute_uring_sharded(
                             stats.inc_out_part();
                         }
                     }
+
+                    if compute_blks && !stripe_leaves.is_empty() {
+                        worker_stripes.push((cur_chunk_base, stripe_leaves));
+                    }
                 }
 
-                Ok(())
+                Ok(worker_stripes)
             });
 
             handles.push(handle);
         }
 
+        let mut collected = Vec::new();
         for h in handles {
-            h.join().map_err(|_| anyhow!("Worker thread panicked"))??;
+            let mut ws = h.join().map_err(|_| anyhow!("Worker thread panicked"))??;
+            collected.append(&mut ws);
         }
-        Ok(())
+        Ok(collected)
     })?;
 
-    Ok(())
+    if compute_blks {
+        let mut sorted_stripes = all_stripes;
+        sorted_stripes.sort_unstable_by_key(|(base, _)| *base);
+        let all_leaves: Vec<[u8; 48]> = sorted_stripes
+            .into_iter()
+            .flat_map(|(_, leaves)| leaves)
+            .collect();
+        if !all_leaves.is_empty() {
+            let root = blks_core::tree::reduce_nodes(all_leaves, true);
+            return Ok(Some((blks_core::encode_base64(&root), "blks")));
+        }
+    }
+
+    Ok(None)
 }

@@ -69,8 +69,8 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   - Vollständige 16-Modul-Matrix in `blkcp-tui` (`ratatui` + `crossterm`) mit 8 Workflow-Presets ([1] NVMe-Uring, [2] Forensik+BLKS, [3] Sparse+B3, [4] Reflink, [5] 2G-Bench, [6] Splice, [7] Direct-NoCache, [8] Swab), Auto-Resolve [Z], File-Browser, Dry-Run-Modal und Live-Transfer-Runner.
   - Modulare Architektur-Entflechtung der TUI: Saubere Trennung in `tui_state.rs` (Zustand & Advisor), `tui_render.rs` (Ratatui-Widgets) und `tui_main.rs` (Event-Loop & Controller, von 1.904 auf 312 Zeilen verschlankt, -83 %).
   - Echter Linux `splice(2)`-Treiber, `copy_file_range(2)` Reflink, `posix_fadvise(..., DONTNEED)` für `--nocache`, 4-KiB-aligned `AlignedBuffer` für `O_DIRECT` über alle Treiber (`sync`, `async`, `uring`) und Multi-Ring `io_uring` Sharding (`-j N`).
-  - Native `io_uring` In-Flight Checksumming-Integration (`--blake3`: **1,15 GB/s (+22,8 % vs C)**, `--blks`: **0,92 GB/s (+18,1 % vs C)**) sowie vollständige Sharding-Checksumming-Parität mit `-j N --hash`.
-  - Mathematischer Formalbeweis und verifizierter Inter-Chunk Merkle Combiner für BLKS-384 Subtree-Reduktion in `rust/src/hash.rs`.
+  - Native `io_uring` In-Flight Checksumming-Integration (`--blake3`: **1,15 GB/s (+22,8 % vs C)**, `--blks`: **0,92 GB/s (+18,1 % vs C)**) sowie paralleles Multi-Ring Sharded BLKS-384 Hashing (`-j 4 --blks`: **1,39 GB/s, +78,2 % vs C**) via Inter-Chunk Merkle Combiner.
+  - Lock-free `crossbeam-channel` Ringpuffer in der 3-Stufen-Async-Engine (`rust/src/engine.rs`) und 64/128-Byte Cacheline-Padding (`CachePadded<AtomicU64>`) in `rust/src/stats.rs` zur vollständigen Beseitigung von CPU-Cache False-Sharing.
   - Gehärteter Target Safety Guard (`rust/src/safety.rs`) gegen `/proc/mounts`, `/proc/swaps` und rekursive `/sys/class/block/<dev>/holders` (LUKS/LVM/mdadm) sowie Schutz vor `O_TRUNC` auf Blockgeräten.
   - Exakt **7 `unsafe`-Segmente** im gesamten Rust-Code (`aligned.rs`: 6 RAII-DMA-Puffer-Primitive, `uring.rs`: 1 zentraler `push_sqe`-Helper, `swab.rs`: 0 durch Safe LLVM-Autovektorisierung, `engine.rs`: 0 durch `nix::fcntl`), alle verbleibenden Blöcke zu **100 % mit `// SAFETY:`-Invarianten dokumentiert**.
 
@@ -80,6 +80,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 - [x] **Strikte `hol-guard` Kompatibilität (Command Protection):**
   - CLI-Flags, Positionsargumente und Aufrufmuster in `rust/src/args.rs` zu 100 % abgeglichen mit dem `blkcp`-Schutzmodul in `hol-guard` (Commit `82ad7e78`, PR #3062 / `contributions/command-sources/command.blkcp.json`). Volle Fail-Secure- und Pattern-Parität verifiziert.
+  - *Hinweis für künftiges `hol-guard`-Update:* Sobald `feature/rust-core` / `feature/hol-guard-compat` final gemergt wird, können die erweiterten Flags (`--blake3`, `--blks`, `-j`/`--threads`/`--shards`, `--notrunc`, `--noerror`, `-n`/`--dry-run`, `--fsync`, `--fdatasync`) optional in `contributions/command-sources/command.blkcp.json` ergänzt werden (bis dahin greift der `fail_secure_unknown_options: true`-Schutz von `hol-guard` automatisch).
 
 - [ ] **Compiler- & Linker-Hardening (`Makefile`):**
   - Standardmäßige Härtungs-Flags für alle Builds verankern: `-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie` sowie Linker-Hardening (`-Wl,-z,relro,-z,now`, `-Wl,-z,defs`).
@@ -94,5 +95,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 ## 3. Zukünftige funktionale Erweiterungen
 
-- [ ] **Paralleler Multi-Ring Tree-Hash Zusammenführer (Inter-Chunk Merkle Combiner):**
-  - Paralleles Hashen einzelner 64-MiB-Chunks in Worker-Threads mit anschließender deterministischer Reduktion im Merkle-Baum bei Multi-Ring Sharding (`-j N`) ohne Single-Ring-Fallback.
+- [x] **Paralleler Multi-Ring Tree-Hash Zusammenführer (Inter-Chunk Merkle Combiner):**
+  - Paralleles Hashen einzelner 64-MiB-Chunks in Worker-Threads mit anschließender deterministischer Reduktion im Merkle-Baum bei Multi-Ring Sharding (`-j N --blks`) ohne Single-Ring-Fallback implementiert und bitgenau verifiziert (**1,39 GB/s**, +78,2 % vs. C-Referenz).
+- [ ] **Cross-Platform Storage-Backends (macOS / BSD / Windows):**
+  - macOS APFS CoW-Klonen via `clonefile(2)`, Page-Cache-Bypass via `fcntl(F_NOCACHE)` und POSIX-Mount-Guard via `getmntinfo(3)` / `statfs(2)`.

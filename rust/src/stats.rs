@@ -1,30 +1,36 @@
+use crossbeam_utils::CachePadded;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+/// High-concurrency transfer telemetry counters.
+///
+/// Each atomic counter is wrapped in `CachePadded` (64/128-byte cache-line aligned)
+/// to eliminate CPU L1/L2 cache-line bouncing (false sharing) across reader, writer,
+/// hasher, and multi-ring `io_uring` shard threads.
 pub struct Stats {
     pub start_time: Instant,
-    pub records_in_full: AtomicU64,
-    pub records_in_part: AtomicU64,
-    pub records_out_full: AtomicU64,
-    pub records_out_part: AtomicU64,
-    pub bytes_copied: AtomicU64,
-    pub async_capacity: AtomicU64,
-    pub reader_stalls: AtomicU64,
-    pub writer_stalls: AtomicU64,
+    pub records_in_full: CachePadded<AtomicU64>,
+    pub records_in_part: CachePadded<AtomicU64>,
+    pub records_out_full: CachePadded<AtomicU64>,
+    pub records_out_part: CachePadded<AtomicU64>,
+    pub bytes_copied: CachePadded<AtomicU64>,
+    pub async_capacity: CachePadded<AtomicU64>,
+    pub reader_stalls: CachePadded<AtomicU64>,
+    pub writer_stalls: CachePadded<AtomicU64>,
 }
 
 impl Stats {
     pub fn new() -> Self {
         Self {
             start_time: Instant::now(),
-            records_in_full: AtomicU64::new(0),
-            records_in_part: AtomicU64::new(0),
-            records_out_full: AtomicU64::new(0),
-            records_out_part: AtomicU64::new(0),
-            bytes_copied: AtomicU64::new(0),
-            async_capacity: AtomicU64::new(0),
-            reader_stalls: AtomicU64::new(0),
-            writer_stalls: AtomicU64::new(0),
+            records_in_full: CachePadded::new(AtomicU64::new(0)),
+            records_in_part: CachePadded::new(AtomicU64::new(0)),
+            records_out_full: CachePadded::new(AtomicU64::new(0)),
+            records_out_part: CachePadded::new(AtomicU64::new(0)),
+            bytes_copied: CachePadded::new(AtomicU64::new(0)),
+            async_capacity: CachePadded::new(AtomicU64::new(0)),
+            reader_stalls: CachePadded::new(AtomicU64::new(0)),
+            writer_stalls: CachePadded::new(AtomicU64::new(0)),
         }
     }
 

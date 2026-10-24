@@ -831,7 +831,7 @@ fn execute_async_transfer(
     hasher: &mut InFlightHasher,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<()> {
-    use std::sync::mpsc::sync_channel;
+    use crossbeam_channel::bounded;
 
     let block_size = cfg.block_size.max(1);
     let queue_depth = cfg
@@ -841,9 +841,9 @@ fn execute_async_transfer(
         .async_capacity
         .store(queue_depth as u64, Ordering::Relaxed);
 
-    let (data_tx, data_rx) = sync_channel::<(AlignedBuffer, usize)>(queue_depth);
-    let (recycle_tx, recycle_rx) = sync_channel::<AlignedBuffer>(queue_depth);
-    let (hash_tx, hash_rx) = sync_channel::<(AlignedBuffer, usize)>(queue_depth);
+    let (data_tx, data_rx) = bounded::<(AlignedBuffer, usize)>(queue_depth);
+    let (recycle_tx, recycle_rx) = bounded::<AlignedBuffer>(queue_depth);
+    let (hash_tx, hash_rx) = bounded::<(AlignedBuffer, usize)>(queue_depth);
 
     // Pre-allocate exactly queue_depth 4096B-aligned buffers (zero allocations during transfer loop)
     for _ in 0..queue_depth {

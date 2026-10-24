@@ -332,7 +332,91 @@ impl TuiState {
                     "Preset [5] geladen: 2 GiB Speed-Benchmark (/dev/zero -> /dev/null, -e uring -j 4 -l 2G)"
                         .to_string();
             }
+            6 => {
+                // In-Kernel Zero-Copy Splice Pipeline
+                self.engine = Engine::Splice;
+                self.threads = 1;
+                self.block_size_str = "1M";
+                self.direct_io = false;
+                self.nocache = false;
+                self.sparse = false;
+                self.swab = false;
+                self.sync_pad = false;
+                self.hash_algo = HashAlgo::None;
+                self.sync_mode = SyncMode::Fdatasync;
+                self.status_msg =
+                    "Preset [6] geladen: In-Kernel Zero-Copy Splice (-e splice -b 1M --fdatasync)"
+                        .to_string();
+            }
+            7 => {
+                // High-End Multi-Ring Direct I/O Cache-Bypass (100+ GB Storage Transfers)
+                self.engine = Engine::Uring;
+                self.threads = 4;
+                self.block_size_str = "1M";
+                self.direct_io = true;
+                self.nocache = true;
+                self.sparse = false;
+                self.swab = false;
+                self.sync_pad = false;
+                self.hash_algo = HashAlgo::None;
+                self.sync_mode = SyncMode::Fdatasync;
+                self.status_msg =
+                    "Preset [7] geladen: Direct I/O + No-Cache Multi-Ring (-e uring -j 4 --direct --nocache --fdatasync)"
+                        .to_string();
+            }
+            8 => {
+                // Cross-Architecture Endian-Swap Migration (AVX2 Swab + BLAKE3 Integrity)
+                self.engine = Engine::Async;
+                self.threads = 1;
+                self.block_size_str = "1M";
+                self.direct_io = false;
+                self.nocache = false;
+                self.sparse = false;
+                self.swab = true;
+                self.sync_pad = false;
+                self.hash_algo = HashAlgo::Blake3;
+                self.sync_mode = SyncMode::Fdatasync;
+                self.status_msg =
+                    "Preset [8] geladen: Cross-Arch Endian-Swap mit AVX2 & BLAKE3 (--swab --blake3 -e async -b 1M)"
+                        .to_string();
+            }
             _ => {}
+        }
+    }
+
+    fn auto_resolve_combinations(&mut self) {
+        let mut changes = Vec::new();
+
+        // 1. Reflink with userspace transforms or hashing
+        if self.engine == Engine::Reflink
+            && (self.hash_algo != HashAlgo::None || self.swab || self.sparse || self.sync_pad)
+        {
+            self.engine = Engine::Auto;
+            changes.push("Engine 'reflink' -> 'auto' umgestellt");
+        }
+
+        // 2. Splice with Direct I/O or Hash/Swab
+        if self.engine == Engine::Splice && self.direct_io {
+            self.direct_io = false;
+            changes.push("Direct I/O deaktiviert (splice(2) inkompatibel)");
+        }
+        if self.engine == Engine::Splice && (self.hash_algo != HashAlgo::None || self.swab) {
+            self.engine = Engine::Async;
+            changes.push("Engine 'splice' -> 'async' umgestellt (für Hash/Swab)");
+        }
+
+        // 3. Direct I/O with redundant nocache
+        if self.direct_io && self.nocache {
+            self.nocache = false;
+            changes.push("No-Cache deaktiviert (Direct I/O umgeht Page Cache)");
+        }
+
+        if changes.is_empty() {
+            self.status_msg =
+                "Kombinations-Check: Alle aktiven Module sind bereits optimal abgestimmt."
+                    .to_string();
+        } else {
+            self.status_msg = format!("Auto-Resolve: {}", changes.join(" | "));
         }
     }
 
@@ -562,26 +646,56 @@ impl TuiState {
         let mut notes = Vec::new();
         let mut severity = Color::Green;
 
-        let needs_userspace =
-            self.hash_algo != HashAlgo::None || self.swab || self.sparse || self.sync_pad;
+        let needs_userspace = self.swab || self.sparse || self.sync_pad;
 
-        if self.engine == Engine::Reflink && needs_userspace {
+        // 1. Reflink Compatibility
+        if self.engine == Engine::Reflink && (self.hash_algo != HashAlgo::None || needs_userspace) {
             notes.push(
                 "Reflink + Userspace-Transformation (Hash/Swab/Sparse) inkompatibel -> nutzt Buffered-Streaming"
                     .to_string(),
             );
             severity = Color::Yellow;
-        } else if self.engine == Engine::Uring && needs_userspace {
+        }
+
+        // 2. Splice Compatibility
+        if self.engine == Engine::Splice && self.direct_io {
+            notes.push("KONFLIKT: splice(2) unterstützt kein O_DIRECT (--direct)!".to_string());
+            severity = Color::Red;
+        } else if self.engine == Engine::Splice && (self.hash_algo != HashAlgo::None || self.swab) {
             notes.push(
-                "io_uring + Hash/Swab/Sparse gewählt -> transparenter Fallback auf Userspace-Pipeline für bitgenaue Prüfsumme"
+                "KONFLIKT: splice(2) ist Zero-Copy im Kernel und schließt In-Flight Transformationen (Hash/Swab) aus!"
                     .to_string(),
             );
-            severity = Color::Yellow;
-        } else if self.engine == Engine::Uring && self.threads > 1 {
-            notes.push(format!(
-                "Multi-Ring io_uring aktiv ({} parallele Kernel-Ringe à 64 MiB Stripes)",
-                self.threads
-            ));
+            severity = Color::Red;
+        }
+
+        // 3. io_uring Native Capabilities
+        if self.engine == Engine::Uring || (self.threads > 1 && self.engine == Engine::Auto) {
+            if self.hash_algo != HashAlgo::None {
+                let algo_name = match self.hash_algo {
+                    HashAlgo::None => "none",
+                    HashAlgo::Blake3 => "BLAKE3",
+                    HashAlgo::Blks => "BLKS-384",
+                    HashAlgo::Sha256 => "SHA-256",
+                };
+                notes.push(format!(
+                    "io_uring In-Flight Hash aktiv (1,15 GB/s BLAKE3 / 0,92 GB/s BLKS-384, {})",
+                    algo_name
+                ));
+            }
+            if needs_userspace {
+                notes.push(
+                    "io_uring + Swab/Sparse/Sync gewählt -> transparenter Fallback auf Userspace-Pipeline"
+                        .to_string(),
+                );
+                severity = Color::Yellow;
+            }
+            if self.threads > 1 && self.hash_algo == HashAlgo::None {
+                notes.push(format!(
+                    "Multi-Ring io_uring aktiv ({} parallele Kernel-Ringe à 64 MiB Stripes)",
+                    self.threads
+                ));
+            }
         } else if self.engine == Engine::Async {
             let hash_stage = if self.hash_algo != HashAlgo::None {
                 "3-Stufen (Reader -> Writer -> Hasher)"
@@ -594,6 +708,16 @@ impl TuiState {
             ));
         }
 
+        // 4. Direct I/O & Cache Synergy
+        if self.direct_io && self.nocache {
+            notes.push(
+                "--direct umgeht den Page Cache bereits; --nocache ist redundant.".to_string(),
+            );
+            if severity == Color::Green {
+                severity = Color::Cyan;
+            }
+        }
+
         if let Some(src) = self.devices.get(self.source_idx) {
             if src.kind == EndpointKind::VirtualDevice
                 && (self.limit_str.trim().is_empty() || self.limit_str.trim() == "0")
@@ -602,7 +726,9 @@ impl TuiState {
                     "ACHTUNG: Endlos-Stream ({}) ohne Byte-Limit (-l)! Setze [L] Limit oder stoppe manuell mit [X].",
                     src.path.display()
                 ));
-                severity = Color::Yellow;
+                if severity != Color::Red {
+                    severity = Color::Yellow;
+                }
             }
         }
 
@@ -993,12 +1119,16 @@ fn handle_key_event(state: &mut TuiState, code: KeyCode, _modifiers: KeyModifier
                 selected_idx: 0,
             };
         }
-        // Workflow Combination Presets 1..5
+        // Workflow Combination Presets 1..8 & Auto-Resolve
         KeyCode::Char('1') => state.apply_preset(1),
         KeyCode::Char('2') => state.apply_preset(2),
         KeyCode::Char('3') => state.apply_preset(3),
         KeyCode::Char('4') => state.apply_preset(4),
         KeyCode::Char('5') => state.apply_preset(5),
+        KeyCode::Char('6') => state.apply_preset(6),
+        KeyCode::Char('7') => state.apply_preset(7),
+        KeyCode::Char('8') => state.apply_preset(8),
+        KeyCode::Char('z') | KeyCode::Char('Z') => state.auto_resolve_combinations(),
         KeyCode::Enter => {
             if state.dry_run {
                 state.start_transfer();
@@ -1045,9 +1175,18 @@ fn render_ui(f: &mut ratatui::Frame, state: &TuiState) {
         Span::raw(" Presets: "),
         Span::styled("[1] NVMe-Uring ", Style::default().fg(Color::Cyan)),
         Span::styled("[2] Forensik+BLKS ", Style::default().fg(Color::Green)),
-        Span::styled("[3] Sparse+BLAKE3 ", Style::default().fg(Color::Magenta)),
-        Span::styled("[4] CoW-Reflink ", Style::default().fg(Color::Blue)),
-        Span::styled("[5] 2G-Speedtest ", Style::default().fg(Color::Yellow)),
+        Span::styled("[3] Sparse+B3 ", Style::default().fg(Color::Magenta)),
+        Span::styled("[4] Reflink ", Style::default().fg(Color::Blue)),
+        Span::styled("[5] 2G-Bench ", Style::default().fg(Color::Yellow)),
+        Span::styled("[6] Splice ", Style::default().fg(Color::LightBlue)),
+        Span::styled("[7] Direct-NoCache ", Style::default().fg(Color::LightCyan)),
+        Span::styled("[8] Swab ", Style::default().fg(Color::LightMagenta)),
+        Span::styled(
+            " | [Z] Auto-Fix ",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]))
     .block(
         Block::default()
@@ -1716,5 +1855,50 @@ mod tests {
         let (advice, color) = state.analyze_combination();
         assert!(advice.contains("Reflink"));
         assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn test_presets_6_7_8_and_auto_resolve() {
+        let mut state = TuiState::new();
+
+        // Preset 6: Splice
+        state.apply_preset(6);
+        assert_eq!(state.engine, Engine::Splice);
+        assert_eq!(state.sync_mode, SyncMode::Fdatasync);
+        assert!(state.build_cli_command().contains("-e splice"));
+
+        // Preset 7: Direct + NoCache
+        state.apply_preset(7);
+        assert_eq!(state.engine, Engine::Uring);
+        assert_eq!(state.threads, 4);
+        assert!(state.direct_io);
+        assert!(state.nocache);
+        let cli7 = state.build_cli_command();
+        assert!(cli7.contains("--direct"));
+        assert!(cli7.contains("--nocache"));
+        assert!(cli7.contains("-j 4"));
+
+        // Preset 8: Swab + Blake3
+        state.apply_preset(8);
+        assert_eq!(state.engine, Engine::Async);
+        assert!(state.swab);
+        assert_eq!(state.hash_algo, HashAlgo::Blake3);
+        let cli8 = state.build_cli_command();
+        assert!(cli8.contains("--swab"));
+        assert!(cli8.contains("--blake3"));
+
+        // Conflict introduction & Auto-resolve
+        state.engine = Engine::Splice;
+        state.direct_io = true;
+        state.hash_algo = HashAlgo::Blks;
+        let (conflict_adv, sev) = state.analyze_combination();
+        assert_eq!(sev, Color::Red);
+        assert!(conflict_adv.contains("KONFLIKT"));
+
+        state.auto_resolve_combinations();
+        let (_resolved_adv, resolved_sev) = state.analyze_combination();
+        assert_ne!(resolved_sev, Color::Red);
+        assert!(!state.direct_io);
+        assert_eq!(state.engine, Engine::Async);
     }
 }

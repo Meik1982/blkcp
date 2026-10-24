@@ -1,3 +1,12 @@
+blkcp (2.0.0-1) unstable; urgency=medium
+
+  * Promote memory-safe Rust 2021 Core & 16-Module Ratatui TUI to primary binaries (blkcp, blkcp-tui).
+  * Retain hardened C11 & ncursesw reference implementation as blkcp-c and blkcp-tui-c.
+  * Add in-flight BLAKE3 and Post-Quantum BLKS-384 checksumming with Multi-Ring io_uring Merkle Combiner.
+  * Enforce ANSSI & Rust-2024 safety contract and C11 FORTIFY_SOURCE=3 / PIE / Full-RELRO hardening.
+
+ -- Meik Augenblick <meik@github.com>  Sat, 24 Oct 2026 19:00:00 +0200
+
 blkcp (1.0.1-1) unstable; urgency=medium
 
   * Add non-destructive --dry-run / -n simulation mode with JSON plan.

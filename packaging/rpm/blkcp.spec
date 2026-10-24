@@ -1,7 +1,7 @@
 %define debug_package %{nil}
 
 Name:           blkcp
-Version:        1.0.1
+Version:        2.0.0
 Release:        1%{?dist}
 Summary:        Next-Gen High-Performance Block Copy Tool for Linux
 License:        GPL-3.0-or-later

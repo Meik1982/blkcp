@@ -1,7 +1,7 @@
 CC ?= gcc
 CARGO ?= cargo
-CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP
-LDFLAGS ?= 
+CFLAGS ?= -O2 -g -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE
+LDFLAGS ?= -pie -Wl,-z,relro,-z,now,-z,defs
 LIBS ?= lib/libcoreutils.a -lcrypto -lpthread -luring -lblake3
 
 # BLKS 384-Bit Post-Quantum Tree-Hash Library (built in-tree via rust/crates/blks-core or external)
@@ -63,7 +63,7 @@ c-bins: $(LOCAL_BLKS_LIB) $(TARGET_C) $(TARGET_TUI_C)
 release:
 	$(MAKE) clean-c
 	$(MAKE) rust-bins
-	$(MAKE) CFLAGS="-O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-flto -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now" c-bins
+	$(MAKE) CFLAGS="-O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE" LDFLAGS="-flto -pie -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now,-z,defs" c-bins
 	strip --strip-all $(TARGET_C) $(TARGET_TUI_C)
 	@mkdir -p bin
 	@cp -f $(TARGET) bin/$(TARGET)

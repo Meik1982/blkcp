@@ -17,7 +17,7 @@ It completely eliminates legacy 1970s `key=value` syntax (`if=`, `of=`, `ibs=`, 
 
 ## ⚡ Key Highlights & Benchmark Comparison
 
-| Feature / Workload | System `dd` (Coreutils 9.5) | `blkcp` (v1.0.0) | Performance Delta |
+| Feature / Workload | System `dd` (Coreutils 9.5) | `blkcp` (v2.0.0) | Performance Delta |
 | :--- | :--- | :--- | :--- |
 | **Sequential Stream (bs=1M)** | 24.30 GB/s | **24.60 GB/s** | **+1.2%** |
 | **Autotuning (`-b auto`)** | 0.58 GB/s (default 512) | **8.40 GB/s** | **+1,343.3%** 🚀 |

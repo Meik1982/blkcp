@@ -83,8 +83,10 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   - CLI-Flags, Positionsargumente und Aufrufmuster in `rust/src/args.rs` zu 100 % abgeglichen mit dem `blkcp`-Schutzmodul in `hol-guard` (Commit `82ad7e78`, PR #3062 / `contributions/command-sources/command.blkcp.json`). Volle Fail-Secure- und Pattern-Parität verifiziert.
   - *Hinweis für künftiges `hol-guard`-Update:* Sobald `feature/rust-core` / `feature/hol-guard-compat` final gemergt wird, können die erweiterten Flags (`--blake3`, `--blks`, `-j`/`--threads`/`--shards`, `--notrunc`, `--noerror`, `-n`/`--dry-run`, `--fsync`, `--fdatasync`) optional in `contributions/command-sources/command.blkcp.json` ergänzt werden (bis dahin greift der `fail_secure_unknown_options: true`-Schutz von `hol-guard` automatisch).
 
-- [ ] **Compiler- & Linker-Hardening (`Makefile`):**
-  - Standardmäßige Härtungs-Flags für alle Builds verankern: `-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie` sowie Linker-Hardening (`-Wl,-z,relro,-z,now`, `-Wl,-z,defs`).
+- [x] **Compiler- & Linker-Hardening (`Makefile` & OSS Audit Gate `make audit`):**
+  - Standardmäßige Härtungs-Flags für alle C11-Builds verankert: `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie` sowie Linker-Hardening (`-Wl,-z,relro,-z,now,-z,defs`).
+  - Formales OSS-Audit-Protokoll (`SECURITY_AUDIT.md`, `SECURITY_AUDIT.de.md`, `rust/deny.toml` und `make audit`) nach Rust-Stdlib- und ANSSI-Richtlinien verankert.
+  - Konsistenter Versionsstand **`2.0.0`** über `rust/Cargo.toml`, `src/version.c`, `PKGBUILD`, `.SRCINFO`, `blkcp.spec` und `debian/changelog`.
 - [ ] **Statische Tiefenanalyse (`GCC -fanalyzer` / `clang-tidy`):**
   - Dediziertes Target `make analyze` im `Makefile` zur Erkennung potenzieller Ressourcen-Leaks, uninitialisierter Variablenpfade und hypothetischer Deadlocks im Multi-Threading-Code.
 - [ ] **Linux Seccomp-BPF Sandboxing:**

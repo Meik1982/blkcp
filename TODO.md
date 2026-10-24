@@ -67,6 +67,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 - [x] **Paralleler Rust-Core & Ratatui TUI (`rust/`, Branch `feature/rust-core`):**
   - 100 % Feature- und CLI-Parität zum C-Referenzkern (42/42 Regressionstests grün gegen `rust/target/release/blkcp`, 9/9 Rust-Unit-Tests grün, 0 Clippy-Warnungen).
   - Vollständige 16-Modul-Matrix in `blkcp-tui` (`ratatui` + `crossterm`) mit 8 Workflow-Presets ([1] NVMe-Uring, [2] Forensik+BLKS, [3] Sparse+B3, [4] Reflink, [5] 2G-Bench, [6] Splice, [7] Direct-NoCache, [8] Swab), Auto-Resolve [Z], File-Browser, Dry-Run-Modal und Live-Transfer-Runner.
+  - Modulare Architektur-Entflechtung der TUI: Saubere Trennung in `tui_state.rs` (Zustand & Advisor), `tui_render.rs` (Ratatui-Widgets) und `tui_main.rs` (Event-Loop & Controller, von 1.904 auf 312 Zeilen verschlankt, -83 %).
   - Echter Linux `splice(2)`-Treiber, `copy_file_range(2)` Reflink, `posix_fadvise(..., DONTNEED)` für `--nocache`, 4-KiB-aligned `AlignedBuffer` für `O_DIRECT` über alle Treiber (`sync`, `async`, `uring`) und Multi-Ring `io_uring` Sharding (`-j N`).
   - Native `io_uring` In-Flight Checksumming-Integration (`--blake3`: **1,15 GB/s (+22,8 % vs C)**, `--blks`: **0,92 GB/s (+18,1 % vs C)**) sowie vollständige Sharding-Checksumming-Parität mit `-j N --hash`.
   - Mathematischer Formalbeweis und verifizierter Inter-Chunk Merkle Combiner für BLKS-384 Subtree-Reduktion in `rust/src/hash.rs`.
@@ -77,8 +78,8 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
 
 ## 2. Geplante Code-Härtung, Kompatibilität & Security-Maßnahmen
 
-- [ ] **Strikte `hol-guard` Kompatibilität (Command Protection):**
-  - Vor einem Merge von `feature/rust-core` nach `main` sicherstellen, dass sämtliche CLI-Flags, Positionsargumente und Aufrufmuster 100 % kompatibel mit dem `blkcp`-Schutzmodul in `hol-guard` (Commit `82ad7e78`, PR #3062) bleiben bzw. das `hol-guard`-Modul bei neuen Optionen synchron angepasst wird.
+- [x] **Strikte `hol-guard` Kompatibilität (Command Protection):**
+  - CLI-Flags, Positionsargumente und Aufrufmuster in `rust/src/args.rs` zu 100 % abgeglichen mit dem `blkcp`-Schutzmodul in `hol-guard` (Commit `82ad7e78`, PR #3062 / `contributions/command-sources/command.blkcp.json`). Volle Fail-Secure- und Pattern-Parität verifiziert.
 
 - [ ] **Compiler- & Linker-Hardening (`Makefile`):**
   - Standardmäßige Härtungs-Flags für alle Builds verankern: `-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, `-fstack-clash-protection`, `-fPIE -pie` sowie Linker-Hardening (`-Wl,-z,relro,-z,now`, `-Wl,-z,defs`).

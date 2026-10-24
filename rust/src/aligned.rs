@@ -2,8 +2,8 @@ use std::alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout};
 use std::ops::{Deref, DerefMut};
 
 /// A memory buffer guaranteed to be aligned to a given power-of-two boundary
-/// (defaulting to 4096-byte memory page boundaries for Linux O_DIRECT, macOS F_NOCACHE,
-/// and Windows FILE_FLAG_NO_BUFFERING).
+/// (defaulting to 4096-byte memory page boundaries for Linux `O_DIRECT`, macOS `F_NOCACHE`,
+/// and Windows `FILE_FLAG_NO_BUFFERING`).
 pub struct AlignedBuffer {
     ptr: *mut u8,
     layout: Layout,

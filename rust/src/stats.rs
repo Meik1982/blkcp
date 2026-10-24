@@ -65,7 +65,7 @@ impl Stats {
         let r_out_p = self.records_out_part.load(Ordering::Relaxed);
         let bytes = self.bytes_copied.load(Ordering::Relaxed);
 
-        let elapsed = self.start_time.elapsed().as_secs_f64().max(0.000001);
+        let elapsed = self.start_time.elapsed().as_secs_f64().max(0.000_001);
         let speed = (bytes as f64) / elapsed;
 
         eprintln!("{}+{} records in", r_in_f, r_in_p);
@@ -95,7 +95,7 @@ impl Stats {
         let r_out_p = self.records_out_part.load(Ordering::Relaxed);
         let bytes = self.bytes_copied.load(Ordering::Relaxed);
 
-        let elapsed = self.start_time.elapsed().as_secs_f64().max(0.000001);
+        let elapsed = self.start_time.elapsed().as_secs_f64().max(0.000_001);
         let speed = (bytes as f64) / elapsed;
 
         if json {

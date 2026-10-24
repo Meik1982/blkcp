@@ -1,3 +1,9 @@
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(clippy::missing_safety_doc)]
+#![deny(clippy::ptr_as_ptr)]
+#![deny(clippy::cast_ptr_alignment)]
+
 pub mod aligned;
 pub mod args;
 pub mod engine;

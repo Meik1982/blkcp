@@ -21,9 +21,12 @@ pub unsafe extern "C" fn blks_hash_buffer(data: *const u8, len: usize, out_diges
         return -1;
     }
     let res = catch_unwind(|| {
-        let slice = slice::from_raw_parts(data, len);
-        let digest = hash_slice_parallel(slice);
-        std::ptr::copy_nonoverlapping(digest.as_ptr(), out_digest, 48);
+        // SAFETY: Caller guarantees `data` is valid for `len` bytes and `out_digest` is valid for 48 bytes.
+        unsafe {
+            let slice = slice::from_raw_parts(data, len);
+            let digest = hash_slice_parallel(slice);
+            std::ptr::copy_nonoverlapping(digest.as_ptr(), out_digest, 48);
+        }
     });
     if res.is_ok() {
         0
@@ -54,9 +57,17 @@ pub unsafe extern "C" fn blks_hasher_update(
         return -1;
     }
     let res = catch_unwind(|| {
-        let h = &mut *hasher;
-        let slice = slice::from_raw_parts(data, len);
-        h.update(slice);
+        // SAFETY: Caller guarantees `hasher` is a valid non-null pointer from `blks_hasher_new`
+        // and `data` is valid for `len` bytes (or `len == 0`).
+        unsafe {
+            let h = &mut *hasher;
+            let slice = if len == 0 {
+                &[]
+            } else {
+                slice::from_raw_parts(data, len)
+            };
+            h.update(slice);
+        }
     });
     if res.is_ok() {
         0
@@ -76,9 +87,13 @@ pub unsafe extern "C" fn blks_hasher_finalize(hasher: *mut BlksHasher, out_diges
         return -1;
     }
     let res = catch_unwind(|| {
-        let h = Box::from_raw(hasher);
-        let digest = h.finalize();
-        std::ptr::copy_nonoverlapping(digest.as_ptr(), out_digest, 48);
+        // SAFETY: Caller hands back ownership of `hasher` allocated by `blks_hasher_new`
+        // and guarantees `out_digest` points to at least 48 writable bytes.
+        unsafe {
+            let h = Box::from_raw(hasher);
+            let digest = h.finalize();
+            std::ptr::copy_nonoverlapping(digest.as_ptr(), out_digest, 48);
+        }
     });
     if res.is_ok() {
         0
@@ -95,7 +110,10 @@ pub unsafe extern "C" fn blks_hasher_finalize(hasher: *mut BlksHasher, out_diges
 pub unsafe extern "C" fn blks_hasher_free(hasher: *mut BlksHasher) {
     if !hasher.is_null() {
         let _ = catch_unwind(|| {
-            drop(Box::from_raw(hasher));
+            // SAFETY: Caller guarantees `hasher` is a valid non-null pointer allocated by `blks_hasher_new`.
+            unsafe {
+                drop(Box::from_raw(hasher));
+            }
         });
     }
 }
@@ -116,10 +134,13 @@ pub unsafe extern "C" fn blks_digest_to_base64(
         return -1;
     }
     let res = catch_unwind(|| {
-        let digest: &[u8; 48] = &*(in_digest as *const [u8; 48]);
-        let b64 = encode_base64(digest);
-        std::ptr::copy_nonoverlapping(b64.as_ptr(), out_str as *mut u8, 64);
-        *out_str.add(64) = 0; // null-terminator
+        // SAFETY: `in_digest` is valid for 48 bytes (align 1) and `out_str` has >= 65 writable bytes.
+        unsafe {
+            let digest: &[u8; 48] = &*in_digest.cast::<[u8; 48]>();
+            let b64 = encode_base64(digest);
+            std::ptr::copy_nonoverlapping(b64.as_ptr(), out_str.cast::<u8>(), 64);
+            *out_str.add(64) = 0; // null-terminator
+        }
     });
     if res.is_ok() {
         0

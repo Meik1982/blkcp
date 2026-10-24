@@ -9,6 +9,11 @@
 //! - **Multi-Core Merkle Tree:** Leverages Rayon work-stealing parallelism and Linux page-aligned 4 KiB chunks.
 
 #![warn(missing_docs)]
+#![deny(unsafe_op_in_unsafe_fn)]
+#![deny(clippy::undocumented_unsafe_blocks)]
+#![deny(clippy::missing_safety_doc)]
+#![deny(clippy::ptr_as_ptr)]
+#![deny(clippy::cast_ptr_alignment)]
 
 pub mod compress;
 pub mod encoding;
@@ -99,7 +104,7 @@ pub fn hash_file_opts<P: AsRef<Path>>(path: P, use_mmap: bool) -> io::Result<Dig
     let metadata = file.metadata()?;
 
     if use_mmap && metadata.len() > 0 && metadata.is_file() {
-        // Safe fast-path with memory-mapping for files > 0 bytes
+        // SAFETY: `file` is a valid open regular file; OS read-only page mapping is used.
         match unsafe { Mmap::map(&file) } {
             Ok(mmap) => {
                 // Advise kernel for aggressive sequential readahead on Unix
@@ -256,6 +261,7 @@ mod tests {
             let expected2 = tree::hash_chunk(&c2, false);
             let expected3 = tree::hash_chunk(&c3, false);
 
+            // SAFETY: `is_x86_feature_detected!("avx2")` verified AVX2 support at runtime.
             let avx_hashes = unsafe { simd_avx2::hash_4_chunks_avx2(&c0, &c1, &c2, &c3) };
 
             assert_eq!(expected0, avx_hashes[0], "AVX2 mismatch on chunk 0");

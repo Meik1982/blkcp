@@ -19,7 +19,7 @@ jobs:
         include:
           - name: Release (Rust blkcp & C11 blkcp-c)
             build_cmd: make release
-            test_cmd: make test && make test-c
+            test_cmd: make audit && make test && make test-c
             verify_bin: ./blkcp
           - name: C11 AddressSanitizer & UndefinedBehaviorSanitizer
             build_cmd: make CFLAGS="-fsanitize=address,undefined -O1 -g -pthread -Iinclude -Isrc -MMD -MP" LDFLAGS="-fsanitize=address,undefined" c-bins

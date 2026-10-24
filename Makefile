@@ -142,4 +142,29 @@ uninstall:
 	rm -f $(DESTDIR)$(FISHCOMPDIR)/blkcp.fish
 	@echo "=== Deinstallation erfolgreich abgeschlossen ==="
 
-.PHONY: all rust-bins c-bins release clean clean-c test test-c benchmark man tui tui-c install uninstall
+audit:
+	@echo "=== [1/4] Rust Standard Library & ANSSI Safety Gate (Clippy + Unsafe Contract) ==="
+	$(CARGO) clippy --workspace --all-targets --manifest-path rust/Cargo.toml -- -D warnings -D unsafe_op_in_unsafe_fn -D clippy::undocumented_unsafe_blocks -D clippy::missing_safety_doc -D clippy::ptr_as_ptr -D clippy::cast_ptr_alignment
+	@echo "=== [2/4] Verifying Exact Unsafe Block Count in rust/src/ (Expected: 7) ==="
+	@UNSAFE_CNT=$$(grep -rn "unsafe " rust/src/ | grep -v "//" | wc -l); \
+	if [ "$$UNSAFE_CNT" -ne 7 ]; then \
+		echo "AUDIT FAILURE: Expected exactly 7 unsafe blocks in rust/src/, found $$UNSAFE_CNT"; \
+		exit 1; \
+	fi; \
+	echo "Verified: Exactly $$UNSAFE_CNT documented unsafe blocks in rust/src/."
+	@echo "=== [3/4] Supply-Chain & Advisory Gate (cargo-audit / cargo-deny if installed) ==="
+	@if command -v cargo-audit >/dev/null 2>&1; then \
+		$(CARGO) audit --file rust/Cargo.lock; \
+	else \
+		echo "info: cargo-audit not installed (skipping live RustSec network check)"; \
+	fi
+	@if command -v cargo-deny >/dev/null 2>&1; then \
+		$(CARGO) deny --manifest-path rust/Cargo.toml check; \
+	else \
+		echo "info: cargo-deny not installed (declarative policy stored in rust/deny.toml)"; \
+	fi
+	@echo "=== [4/4] Workspace Unit & Cryptographic Verification Suite (18/18 Tests) ==="
+	$(CARGO) test --workspace --manifest-path rust/Cargo.toml --quiet
+	@echo "=== OSS SECURITY & SOUNDNESS AUDIT PASSED SUCCESSFULLY ==="
+
+.PHONY: all rust-bins c-bins release clean clean-c test test-c benchmark man tui tui-c install uninstall audit

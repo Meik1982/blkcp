@@ -9,7 +9,8 @@ use std::arch::x86_64::*;
 use crate::compress::{BLOCK_BYTES, FLAG_CHUNK_END, FLAG_CHUNK_START, IV};
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
+#[target_feature(enable = "avx2")]
+#[inline]
 unsafe fn rotr64_32(x: __m256i) -> __m256i {
     // Rotating 64-bit words by 32 is a 32-bit swap of dwords in each qword:
     // _MM_SHUFFLE(2, 3, 0, 1) = 0xB1
@@ -17,40 +18,38 @@ unsafe fn rotr64_32(x: __m256i) -> __m256i {
 }
 
 #[cfg(target_arch = "x86_64")]
-const ROTR24_MASK: [i8; 32] = [
-    3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13, 14, 15, 8, 9, 10, 3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13, 14,
-    15, 8, 9, 10,
-];
-
-#[cfg(target_arch = "x86_64")]
-const ROTR16_MASK: [i8; 32] = [
-    2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9, 2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13,
-    14, 15, 8, 9,
-];
-
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
+#[target_feature(enable = "avx2")]
+#[inline]
 unsafe fn rotr64_24(x: __m256i) -> __m256i {
-    let mask = _mm256_loadu_si256(ROTR24_MASK.as_ptr() as *const __m256i);
+    let mask = _mm256_setr_epi8(
+        3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13, 14, 15, 8, 9, 10, 3, 4, 5, 6, 7, 0, 1, 2, 11, 12, 13,
+        14, 15, 8, 9, 10,
+    );
     _mm256_shuffle_epi8(x, mask)
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
+#[target_feature(enable = "avx2")]
+#[inline]
 unsafe fn rotr64_16(x: __m256i) -> __m256i {
-    let mask = _mm256_loadu_si256(ROTR16_MASK.as_ptr() as *const __m256i);
+    let mask = _mm256_setr_epi8(
+        2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9, 2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12,
+        13, 14, 15, 8, 9,
+    );
     _mm256_shuffle_epi8(x, mask)
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
+#[target_feature(enable = "avx2")]
+#[inline]
 unsafe fn rotr64_63(x: __m256i) -> __m256i {
     // Rotate right 63 is rotate left 1
     _mm256_or_si256(_mm256_slli_epi64(x, 1), _mm256_srli_epi64(x, 63))
 }
 
 #[cfg(target_arch = "x86_64")]
-#[inline(always)]
+#[target_feature(enable = "avx2")]
+#[inline]
 unsafe fn g_avx2(
     v: &mut [__m256i; 16],
     a: usize,
@@ -60,14 +59,17 @@ unsafe fn g_avx2(
     x: __m256i,
     y: __m256i,
 ) {
-    v[a] = _mm256_add_epi64(_mm256_add_epi64(v[a], v[b]), x);
-    v[d] = rotr64_32(_mm256_xor_si256(v[d], v[a]));
-    v[c] = _mm256_add_epi64(v[c], v[d]);
-    v[b] = rotr64_24(_mm256_xor_si256(v[b], v[c]));
-    v[a] = _mm256_add_epi64(_mm256_add_epi64(v[a], v[b]), y);
-    v[d] = rotr64_16(_mm256_xor_si256(v[d], v[a]));
-    v[c] = _mm256_add_epi64(v[c], v[d]);
-    v[b] = rotr64_63(_mm256_xor_si256(v[b], v[c]));
+    // SAFETY: Caller guarantees AVX2 target feature is active.
+    unsafe {
+        v[a] = _mm256_add_epi64(_mm256_add_epi64(v[a], v[b]), x);
+        v[d] = rotr64_32(_mm256_xor_si256(v[d], v[a]));
+        v[c] = _mm256_add_epi64(v[c], v[d]);
+        v[b] = rotr64_24(_mm256_xor_si256(v[b], v[c]));
+        v[a] = _mm256_add_epi64(_mm256_add_epi64(v[a], v[b]), y);
+        v[d] = rotr64_16(_mm256_xor_si256(v[d], v[a]));
+        v[c] = _mm256_add_epi64(v[c], v[d]);
+        v[b] = rotr64_63(_mm256_xor_si256(v[b], v[c]));
+    }
 }
 
 /// Hashes 4 full 4096-byte chunks simultaneously using AVX2 vector instructions.
@@ -82,15 +84,16 @@ pub unsafe fn hash_4_chunks_avx2(
     c2: &[u8; 4096],
     c3: &[u8; 4096],
 ) -> [[u8; 48]; 4] {
+    let init = crate::compress::initial_cv();
     let mut cv = [
-        _mm256_set1_epi64x(crate::compress::initial_cv()[0] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[1] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[2] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[3] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[4] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[5] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[6] as i64),
-        _mm256_set1_epi64x(crate::compress::initial_cv()[7] as i64),
+        _mm256_set1_epi64x(init[0] as i64),
+        _mm256_set1_epi64x(init[1] as i64),
+        _mm256_set1_epi64x(init[2] as i64),
+        _mm256_set1_epi64x(init[3] as i64),
+        _mm256_set1_epi64x(init[4] as i64),
+        _mm256_set1_epi64x(init[5] as i64),
+        _mm256_set1_epi64x(init[6] as i64),
+        _mm256_set1_epi64x(init[7] as i64),
     ];
 
     let iv_vec = [
@@ -218,18 +221,21 @@ pub unsafe fn hash_4_chunks_avx2(
             };
         }
 
-        round_avx2!(0);
-        round_avx2!(1);
-        round_avx2!(2);
-        round_avx2!(3);
-        round_avx2!(4);
-        round_avx2!(5);
-        round_avx2!(6);
-        round_avx2!(7);
-        round_avx2!(8);
-        round_avx2!(9);
-        round_avx2!(10);
-        round_avx2!(11);
+        // SAFETY: `hash_4_chunks_avx2` is compiled with `#[target_feature(enable = "avx2")]`.
+        unsafe {
+            round_avx2!(0);
+            round_avx2!(1);
+            round_avx2!(2);
+            round_avx2!(3);
+            round_avx2!(4);
+            round_avx2!(5);
+            round_avx2!(6);
+            round_avx2!(7);
+            round_avx2!(8);
+            round_avx2!(9);
+            round_avx2!(10);
+            round_avx2!(11);
+        }
 
         for i in 0..8 {
             cv[i] = _mm256_xor_si256(cv[i], _mm256_xor_si256(v[i], v[i + 8]));
@@ -237,11 +243,15 @@ pub unsafe fn hash_4_chunks_avx2(
     }
 
     let mut out = [[0u8; 48]; 4];
-    for w in 0..6 {
-        let mut words = [0i64; 4];
-        _mm256_storeu_si256(words.as_mut_ptr() as *mut __m256i, cv[w]);
-        for lane in 0..4 {
-            out[lane][w * 8..(w + 1) * 8].copy_from_slice(&(words[lane] as u64).to_le_bytes());
+    for (w, &vec_word) in cv.iter().take(6).enumerate() {
+        let lanes = [
+            _mm256_extract_epi64(vec_word, 0) as u64,
+            _mm256_extract_epi64(vec_word, 1) as u64,
+            _mm256_extract_epi64(vec_word, 2) as u64,
+            _mm256_extract_epi64(vec_word, 3) as u64,
+        ];
+        for (lane, &word) in lanes.iter().enumerate() {
+            out[lane][w * 8..(w + 1) * 8].copy_from_slice(&word.to_le_bytes());
         }
     }
     out

@@ -78,6 +78,7 @@ fn hash_chunks_accelerated(slice: &[u8]) -> Vec<[u8; 48]> {
             let c2: &[u8; 4096] = slice[offset + 8192..offset + 12288].try_into().unwrap();
             let c3: &[u8; 4096] = slice[offset + 12288..offset + 16384].try_into().unwrap();
 
+            // SAFETY: `is_x86_feature_detected!("avx2")` verified CPU AVX2 support at runtime.
             let four_hashes = unsafe { crate::simd_avx2::hash_4_chunks_avx2(c0, c1, c2, c3) };
             leaves.extend_from_slice(&four_hashes);
             i += 4;

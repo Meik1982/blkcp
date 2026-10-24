@@ -51,7 +51,7 @@ fn encode_b64_table(bytes: &[u8; 48], table: &[u8; 64]) -> String {
         out[i * 4 + 2] = table[((b1 & 0x0F) << 2) | (b2 >> 6)];
         out[i * 4 + 3] = table[b2 & 0x3F];
     }
-    // Safety: table only contains valid ASCII characters (A-Z, a-z, 0-9, +, /, -, _)
+    // SAFETY: `table` only contains valid 7-bit ASCII characters (A-Z, a-z, 0-9, +, /, -, _).
     unsafe { String::from_utf8_unchecked(out.to_vec()) }
 }
 
@@ -63,6 +63,7 @@ pub fn encode_hex(bytes: &[u8; 48]) -> String {
         out[i * 2] = HEX_CHARS[(b >> 4) as usize];
         out[i * 2 + 1] = HEX_CHARS[(b & 0x0F) as usize];
     }
+    // SAFETY: `HEX_CHARS` only contains valid ASCII hex digits ('0'..='9', 'a'..='f').
     unsafe { String::from_utf8_unchecked(out.to_vec()) }
 }
 

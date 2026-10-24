@@ -31,7 +31,7 @@ name = "blkcp-tui"
 path = "src/tui_main.rs"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["fs", "signal", "ioctl", "uio", "poll", "process", "term"] }
+nix = { version = "0.29", features = ["fs", "signal", "ioctl", "uio", "poll", "process", "term", "zerocopy"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"

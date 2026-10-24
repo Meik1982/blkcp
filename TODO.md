@@ -71,7 +71,7 @@ Dieses Dokument erfasst den aktuellen Umsetzungsstatus und die nächsten prioris
   - Native `io_uring` In-Flight Checksumming-Integration (`--blake3`: **1,15 GB/s (+22,8 % vs C)**, `--blks`: **0,92 GB/s (+18,1 % vs C)**) sowie vollständige Sharding-Checksumming-Parität mit `-j N --hash`.
   - Mathematischer Formalbeweis und verifizierter Inter-Chunk Merkle Combiner für BLKS-384 Subtree-Reduktion in `rust/src/hash.rs`.
   - Gehärteter Target Safety Guard (`rust/src/safety.rs`) gegen `/proc/mounts`, `/proc/swaps` und rekursive `/sys/class/block/<dev>/holders` (LUKS/LVM/mdadm) sowie Schutz vor `O_TRUNC` auf Blockgeräten.
-  - Exakt **16 `unsafe`-Segmente** im gesamten Rust-Code (`aligned.rs`: 6, `engine.rs`: 4, `swab.rs`: 2, `uring.rs`: 4), alle auf Hardware-SIMD, Page-Aligned Allocator, Kernel-Zero-Copy-Syscalls und `io_uring`-SQEs beschränkt und zu **100 % mit `// SAFETY:`-Invarianten dokumentiert**.
+  - Exakt **12 `unsafe`-Segmente** im gesamten Rust-Code (`aligned.rs`: 6, `uring.rs`: 4, `swab.rs`: 2, `engine.rs`: 0!), alle `engine.rs`-Syscalls (`posix_fadvise`, `copy_file_range`, `splice`) 100 % in Safe Rust via `nix::fcntl` überführt, verbleibende Blöcke zu **100 % mit `// SAFETY:`-Invarianten dokumentiert**.
 
 ---
 

@@ -32,11 +32,13 @@ fn install_signal_handler(_stats: Arc<Stats>) {}
 
 #[cfg(target_os = "linux")]
 fn evict_page_cache(file: &File) {
-    // SAFETY: `file.as_raw_fd()` is a valid open file descriptor. Passing offset=0, len=0
-    // with `POSIX_FADV_DONTNEED` instructs the Linux kernel to drop cached pages for this file.
-    unsafe {
-        let _ = libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
-    }
+    use nix::fcntl::{posix_fadvise, PosixFadviseAdvice};
+    let _ = posix_fadvise(
+        file.as_raw_fd(),
+        0,
+        0,
+        PosixFadviseAdvice::POSIX_FADV_DONTNEED,
+    );
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -164,61 +166,47 @@ fn try_reflink_copy(
             chunk_size
         };
 
-        // SAFETY: `in_file` and `out_file` are valid open file descriptors verified
-        // by prior fstat check. Passing null for offset pointers directs the kernel
-        // to use and advance the current file offsets. `to_copy` is bounded to chunk_size.
-        let ret = unsafe {
-            libc::copy_file_range(
-                in_file.as_raw_fd(),
-                std::ptr::null_mut(),
-                out_file.as_raw_fd(),
-                std::ptr::null_mut(),
-                to_copy,
-                0,
-            )
-        };
-
-        if ret == 0 {
-            break; // EOF
-        } else if ret > 0 {
-            let n = ret as usize;
-            stats.add_bytes(n as u64);
-            stats
-                .records_in_full
-                .fetch_add((n / bs) as u64, Ordering::Relaxed);
-            if !n.is_multiple_of(bs) {
-                stats.inc_in_part();
-            }
-            stats
-                .records_out_full
-                .fetch_add((n / bs) as u64, Ordering::Relaxed);
-            if !n.is_multiple_of(bs) {
-                stats.inc_out_part();
-            }
-            if let Some(ref mut rem) = remaining {
-                *rem = rem.saturating_sub(n as u64);
-            }
-        } else {
-            let err = std::io::Error::last_os_error();
-            let raw_err = err.raw_os_error().unwrap_or(0);
-            if raw_err == libc::EINTR {
-                continue;
-            }
-            if stats.get_bytes() == 0
-                && (raw_err == libc::EXDEV
-                    || raw_err == libc::EINVAL
-                    || raw_err == libc::ENOSYS
-                    || raw_err == libc::EOPNOTSUPP)
-            {
-                if cfg.engine == Engine::Reflink {
-                    return Err(anyhow!(
-                        "copy_file_range not supported for these files: {}",
-                        err
-                    ));
+        match nix::fcntl::copy_file_range(&mut *in_file, None, &mut *out_file, None, to_copy) {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                stats.add_bytes(n as u64);
+                stats
+                    .records_in_full
+                    .fetch_add((n / bs) as u64, Ordering::Relaxed);
+                if !n.is_multiple_of(bs) {
+                    stats.inc_in_part();
                 }
-                return Ok(false); // fallback to standard copy
+                stats
+                    .records_out_full
+                    .fetch_add((n / bs) as u64, Ordering::Relaxed);
+                if !n.is_multiple_of(bs) {
+                    stats.inc_out_part();
+                }
+                if let Some(ref mut rem) = remaining {
+                    *rem = rem.saturating_sub(n as u64);
+                }
             }
-            return Err(anyhow!("copy_file_range error: {}", err));
+            Err(nix_err) => {
+                let raw_err = nix_err as i32;
+                if raw_err == libc::EINTR {
+                    continue;
+                }
+                if stats.get_bytes() == 0
+                    && (raw_err == libc::EXDEV
+                        || raw_err == libc::EINVAL
+                        || raw_err == libc::ENOSYS
+                        || raw_err == libc::EOPNOTSUPP)
+                {
+                    if cfg.engine == Engine::Reflink {
+                        return Err(anyhow!(
+                            "copy_file_range not supported for these files: {}",
+                            nix_err
+                        ));
+                    }
+                    return Ok(false); // fallback to standard copy
+                }
+                return Err(anyhow!("copy_file_range error: {}", nix_err));
+            }
         }
     }
 
@@ -237,9 +225,9 @@ fn try_reflink_copy(
 }
 
 #[cfg(target_os = "linux")]
-fn try_splice_copy(
-    in_fd: std::os::unix::io::RawFd,
-    out_fd: std::os::unix::io::RawFd,
+fn try_splice_copy<FdIn: std::os::fd::AsFd, FdOut: std::os::fd::AsFd>(
+    in_fd: FdIn,
+    out_fd: FdOut,
     cfg: &Config,
     stats: &Stats,
     cancel_flag: &AtomicBool,
@@ -248,8 +236,6 @@ fn try_splice_copy(
         Ok(p) => p,
         Err(_) => return Ok(false),
     };
-    let pipe_r_fd = pipe_r.as_raw_fd();
-    let pipe_w_fd = pipe_w.as_raw_fd();
 
     let bs = cfg.block_size.max(1);
     let chunk_size = bs.clamp(4096, 1024 * 1024);
@@ -259,7 +245,7 @@ fn try_splice_copy(
         remaining = Some(remaining.map_or(total, |r| r.min(total)));
     }
 
-    let flags = libc::SPLICE_F_MOVE | libc::SPLICE_F_MORE;
+    let flags = nix::fcntl::SpliceFFlags::SPLICE_F_MOVE | nix::fcntl::SpliceFFlags::SPLICE_F_MORE;
 
     loop {
         if cancel_flag.load(Ordering::Relaxed) {
@@ -275,60 +261,39 @@ fn try_splice_copy(
             chunk_size
         };
 
-        // SAFETY: `in_fd` and `pipe_w_fd` are valid open file descriptors. Null offset pointers
-        // instruct the kernel to update file offsets in-place.
-        let n_in = unsafe {
-            libc::splice(
-                in_fd,
-                std::ptr::null_mut(),
-                pipe_w_fd,
-                std::ptr::null_mut(),
-                to_splice,
-                flags,
-            )
-        };
-
-        if n_in == 0 {
-            break; // EOF
-        } else if n_in < 0 {
-            let err = std::io::Error::last_os_error();
-            let raw = err.raw_os_error().unwrap_or(0);
-            if raw == libc::EINTR {
-                continue;
-            }
-            if stats.get_bytes() == 0
-                && (raw == libc::EINVAL || raw == libc::ENOSYS || raw == libc::EBADF)
-            {
-                return Ok(false); // Graceful fallback if descriptor does not support splice
-            }
-            return Err(anyhow!("splice input error: {}", err));
-        }
-
-        let mut in_pipe = n_in as usize;
-        while in_pipe > 0 {
-            // SAFETY: `pipe_r_fd` and `out_fd` are valid open file descriptors.
-            let n_out = unsafe {
-                libc::splice(
-                    pipe_r_fd,
-                    std::ptr::null_mut(),
-                    out_fd,
-                    std::ptr::null_mut(),
-                    in_pipe,
-                    flags,
-                )
-            };
-            if n_out < 0 {
-                let err = std::io::Error::last_os_error();
-                let raw = err.raw_os_error().unwrap_or(0);
+        let n_in = match nix::fcntl::splice(&in_fd, None, &pipe_w, None, to_splice, flags) {
+            Ok(0) => break, // EOF
+            Ok(n) => n,
+            Err(nix_err) => {
+                let raw = nix_err as i32;
                 if raw == libc::EINTR {
                     continue;
                 }
-                return Err(anyhow!("splice output error: {}", err));
+                if stats.get_bytes() == 0
+                    && (raw == libc::EINVAL || raw == libc::ENOSYS || raw == libc::EBADF)
+                {
+                    return Ok(false); // Graceful fallback if descriptor does not support splice
+                }
+                return Err(anyhow!("splice input error: {}", nix_err));
             }
-            in_pipe -= n_out as usize;
+        };
+
+        let mut in_pipe = n_in;
+        while in_pipe > 0 {
+            let n_out = match nix::fcntl::splice(&pipe_r, None, &out_fd, None, in_pipe, flags) {
+                Ok(n) => n,
+                Err(nix_err) => {
+                    let raw = nix_err as i32;
+                    if raw == libc::EINTR {
+                        continue;
+                    }
+                    return Err(anyhow!("splice output error: {}", nix_err));
+                }
+            };
+            in_pipe -= n_out;
         }
 
-        let copied = n_in as usize;
+        let copied = n_in;
         stats.add_bytes(copied as u64);
         stats
             .records_in_full
@@ -556,32 +521,37 @@ pub fn execute_transfer_with_control(
         && !cfg.sparse
         && !cfg.sync
     {
-        let mut in_file_holder: Option<File> = None;
-        let mut out_file_holder: Option<File> = None;
-
-        let in_fd = if let Some(ref in_path) = cfg.input {
+        let in_file_holder = if let Some(ref in_path) = cfg.input {
             let mut f = open_input_file(in_path, cfg.direct)?;
             if cfg.skip_bytes > 0 {
                 let _ = f.seek(SeekFrom::Start(cfg.skip_bytes));
             }
-            let fd = f.as_raw_fd();
-            in_file_holder = Some(f);
-            fd
+            Some(f)
         } else {
-            libc::STDIN_FILENO
+            None
         };
 
-        let out_fd = if let Some(ref out_path) = cfg.output {
+        let out_file_holder = if let Some(ref out_path) = cfg.output {
             let mut f = open_output_file(out_path, cfg.notrunc, cfg.direct)?;
             if cfg.seek_bytes > 0 {
                 let _ = f.seek(SeekFrom::Start(cfg.seek_bytes));
             }
-            let fd = f.as_raw_fd();
-            out_file_holder = Some(f);
-            fd
+            Some(f)
         } else {
-            libc::STDOUT_FILENO
+            None
         };
+
+        let s_in = std::io::stdin();
+        let s_out = std::io::stdout();
+        use std::os::fd::AsFd;
+        let in_fd = in_file_holder
+            .as_ref()
+            .map(|f| f.as_fd())
+            .unwrap_or_else(|| s_in.as_fd());
+        let out_fd = out_file_holder
+            .as_ref()
+            .map(|f| f.as_fd())
+            .unwrap_or_else(|| s_out.as_fd());
 
         if let Ok(true) = try_splice_copy(in_fd, out_fd, cfg, &stats, &cancel_flag) {
             if let Some(ref f) = in_file_holder {

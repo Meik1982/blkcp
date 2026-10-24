@@ -24,22 +24,28 @@ Eine eigenständige, modularisierte, durchsatzoptimierte und architektonisch ent
 Der historische Monolith wurde vollständig in getrennte, wartbare Subsysteme zerlegt:
 
 ```
-src/
-├── blkcp.c                 # Schlanke Einstiegs- und Ablaufsteuerung
-├── blkcp_config.h          # Kapselung von Zustand, Bitmasken & Konfiguration (dd_context_t)
-├── args.h / .c            # Moderne CLI-Syntax (-i, -o, -b, -e, -l, -p, --hash) via getopt_long
-├── io_driver.h            # Einheitliches Backend-Treiber-Interface (Strategy Pattern / Inversion of Control)
-├── io_engine_internal.h   # Geteilte I/O-Primitive und Diagnose-Deklarationen
-├── io_engine.h / .c       # Zentrale Stream-Orchestrierung, Skip/Seek, Safety Guard & Transfer-Loop
-├── io_uring.c             # Linux io_uring Asynchronous I/O Treiber (Zero-Syscall Queue Pipeline)
-├── io_sync.c              # Synchroner Block-I/O Treiber mit dynamischem Autotuning (-b auto)
-├── io_async.c             # Multi-Threaded Double-Buffering Ringpuffer Pipeline (-e async)
-├── io_reflink.c           # Linux Kernel-Space Zero-Copy Reflink Treiber (copy_file_range(2))
-├── conversions.h / .c     # Zeichensatz- und Byte-Konvertierungen (SIMD-beschleunigt)
-├── stats.h / .c           # Durchsatz-Telemetrie, Human-readable Formatierung & Live-Fortschritt
-├── signals.h / .c         # Async-Signal-Handler (SIGINT-Cleanup, SIGUSR1-Reporting)
-├── system.h               # POSIX-Systemschnittstellen, gettext & vektorisierter Nullblock-Check
-└── version.c / .h         # Versionsidentifikation
+rust/                           # Primärer Speichersicherer Rust v2.0.0 Workspace (blkcp & blkcp-tui)
+├── src/
+│   ├── main.rs / lib.rs        # CLI-Einstieg & ANSSI/Rust-2024 Safety-Gates
+│   ├── args.rs                 # Moderner GNU/POSIX CLI- & Legacy-dd-Parser
+│   ├── engine.rs               # Einheitliches Treiber-Dispatching, lock-free crossbeam Async-Pipeline, Reflink & Splice
+│   ├── uring.rs                # Single-Ring & Sharded Multi-Ring io_uring + BLKS-384 Merkle Combiner
+│   ├── safety.rs               # Target Safety Guard (/proc/mounts, /proc/swaps & rekursive LUKS/LVM-Holder)
+│   ├── hash.rs                 # In-Flight SHA-256 (SHA-NI), BLAKE3 (SIMD) & BLKS-384 (Post-Quantum)
+│   ├── aligned.rs              # RAII 4096-Byte Page-Aligned DMA-Puffer-Primitive für O_DIRECT
+│   ├── swab.rs                 # 100 % Safe Rust LLVM-autovektorisiertes Endian-Byte-Swapping
+│   ├── stats.rs                # CachePadded<AtomicU64> Telemetrie & NDJSON-Reporting
+│   ├── tui_state.rs            # TUI-Zustandsmaschine, 8 Presets, Kombinations-Advisor & CLI-Generator
+│   ├── tui_render.rs           # 16-Modul Ratatui-Layout, Live-Fortschrittsbalken & Modale Dialoge
+│   ├── tui_device.rs           # Blockgeräte-/Mount-Scanner & interaktiver Datei-Browser
+│   └── tui_main.rs             # Crossterm Raw-Mode & Event-Loop
+└── crates/blks-core/           # Eingebettete 384-Bit Post-Quantum Merkle-Tree-Hash Engine (4-Way AVX2 + C-FFI)
+
+src/                            # C11-Referenzimplementierung (blkcp-c & blkcp-tui-c)
+├── blkcp.c / blkcp_config.h    # Schlanke Einstiegssteuerung & reentranter Kontext (dd_context_t)
+├── io_uring.c / io_async.c     # C11 liburing- & Pthread-Ringpuffer-Treiber
+├── io_reflink.c / io_splice.c  # C11 Zero-Copy Kernel-Treiber
+└── tui/                        # C11 ncursesw 2D-Spatial TUI
 ```
 
 ---
@@ -129,16 +135,21 @@ blkcp -i backup.iso -o /dev/sdb --dry-run --json
 
 ---
 
-## 5. Interaktive 2D-Spatial TUI (`blkcp-tui`)
+## 5. Interaktive 16-Modul-TUI (`blkcp-tui` & `blkcp-tui-c`)
 
-Das Projekt beinhaltet einen vollwertigen Terminal-Assistenten auf Basis von `ncursesw` (`bin/blkcp-tui`):
-* **Visuelle Stream-Auswahl:** Schnellauswahl für reguläre Dateien, physische Blockgeräte (`/sys/class/block`) und Pipes (`|`).
-* **Engine-Umschaltung im Flug:** Auswahl zwischen `io_uring`, `async`, `reflink`, `sync` und `auto` via Leertaste.
-* **Direktes Byte-Limit & Parameter:** Intuitive Konfiguration von Limits (`-l`), Blockgrößen (`-b`), Skip/Seek und Direkt-I/O (`--direct`, `--sparse`, `--sync`).
-* **Live-Telemetrie & Streaming-Hash:** Echtzeit-Fortschrittsbalken, Transferrate und Anzeige des Streaming-SHA-256-Hashes direkt im TUI-Fenster.
-* **Clipboard-Integration:** Exportiert den exakt generierten CLI-Befehl auf Tastendruck (`c`) direkt in die Wayland-/X11-Zwischenablage.
-* **Dry-Run Planungs-Simulation:** Dedizierter `[ DRY-RUN (s) ]` Button und Checkbox (`-n`) mit interaktivem Ausführungsplan-Modal (prüft Ziel-Mounts und Treiber-Heuristiken völlig ohne Schreiboperationen).
-* **Sicherheits-Dialog:** Bestätigungsabfrage vor Schreibzugriffen auf physische Datenträger.
+Das Projekt beinhaltet das interaktive 16-Modul-Kombinations-Dashboard **`blkcp-tui`** (auf Basis von `ratatui` + `crossterm`, ergänzt durch die kompakte C11-`ncursesw`-Referenz **`blkcp-tui-c`**):
+* **Visuelle Endpunkt- & Dateiauswahl (`[F]`):** Schnellauswahl für physische Laufwerke, Partitionen (`[P]`), virtuelle Geräte (`/dev/zero`, `/dev/null`) und interaktiver Verzeichnis-Browser.
+* **16-Modul-Matrix & Direkt-Hotkeys:** Blockgröße (`[B]`), I/O-Engine (`[E]`), Krypto-Hash (`[H]`: `BLAKE3`, `BLKS-384`, `SHA-256`), Multi-Ring Shards (`[J]`), Queue-Depth (`[U]`), Direct I/O (`[D]`), No-Cache (`[C]`), Sparse (`[A]`), AVX2 Swab (`[W]`), Sync-Pad (`[Y]`), No-Truncate (`[T]`), Flush-Sync (`[G]`), Ignore-Err (`[M]`), Dry-Run (`[N]`) und Limits/Offsets (`[L]`).
+* **8 Workflow-Presets per Tastendruck (`[1..8]`):**
+  * `[1]` **NVMe-Uring:** `-e uring -j 4 -b 1M --direct --fdatasync`
+  * `[2]` **Forensik+BLKS:** `-e async --blks --sync --noerror --fsync`
+  * `[3]` **Sparse+BLAKE3:** `-e sync --sparse --blake3 -b 1M --fdatasync`
+  * `[4]` **Reflink CoW:** `-e reflink -b 4M`
+  * `[5]` **2G Speed-Benchmark:** `/dev/zero -> /dev/null -e uring -j 4 -l 2G`
+  * `[6]` **Kernel Splice:** `-e splice -b 1M --fdatasync`
+  * `[7]` **Direct-NoCache:** `-e uring -j 4 --direct --nocache -b 1M`
+  * `[8]` **Cross-Arch Swab:** `-e async --swab --blake3 -b 1M`
+* **Kombinations-Advisor & Auto-Resolve (`[Z]`):** Echtzeit-Prüfung auf Treiber-/Transformations-Konflikte mit automatischer Ein-Tasten-Bereinigung und Live-CLI-Vorschau.
 
 ---
 
@@ -155,25 +166,25 @@ makepkg -si
 
 ### Ubuntu / Debian
 **Empfohlen (Fertiges `.deb`-Paket via `apt`):**
-Lade `blkcp_1.0.1-1_amd64.deb` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+Lade `blkcp_2.0.0-1_amd64.deb` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases/tag/v2.0.0) herunter:
 ```bash
-sudo apt install ./blkcp_1.0.1-1_amd64.deb
+sudo apt install ./blkcp_2.0.0-1_amd64.deb
 ```
 
 *(Oder selbst ein natives `.deb`-Paket aus dem Quellcode bauen):*
 ```bash
 git clone https://github.com/Meik1982/blkcp.git
 cd blkcp
-sudo apt-get update && sudo apt-get install -y build-essential debhelper liburing-dev libssl-dev libncurses-dev dpkg-dev
+sudo apt-get update && sudo apt-get install -y build-essential debhelper cargo rustc liburing-dev libssl-dev libncurses-dev dpkg-dev
 dpkg-buildpackage -us -uc -b
-sudo apt install ../blkcp_1.0.1-1_amd64.deb
+sudo apt install ../blkcp_2.0.0-1_amd64.deb
 ```
 
 ### Fedora / RHEL / openSUSE
 **Empfohlen (Fertiges `.rpm`-Paket via `dnf`):**
-Lade `blkcp-1.0.1-1.x86_64.rpm` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases) herunter:
+Lade `blkcp-2.0.0-1.fc44.x86_64.rpm` von den [GitHub Releases](https://github.com/Meik1982/blkcp/releases/tag/v2.0.0) herunter:
 ```bash
-sudo dnf install ./blkcp-1.0.1-1.x86_64.rpm
+sudo dnf install ./blkcp-2.0.0-1.fc44.x86_64.rpm
 ```
 
 ### Manuelle Installation aus dem Quellcode (alle Distributionen):
@@ -185,17 +196,22 @@ sudo make install
 
 ---
 
-## 7. Bauen, Testen & Benchmarking
+## 7. Bauen, Auditieren, Testen & Benchmarking
+
+Details zum Sicherheits- und Soundness-Audit (ANSSI & Rust-2024 Richtlinien, Inventar aller 7 `unsafe`-Blöcke) finden sich in **[SECURITY_AUDIT.de.md](SECURITY_AUDIT.de.md)** (englisch: [SECURITY_AUDIT.md](SECURITY_AUDIT.md)).
 
 ```bash
-# Debug-/Entwicklungsbuild:
-make all
-
-# Optimierter Release-Build (-O3, -flto, vollständig gestrippt):
+# Optimierter Release-Build (Rust blkcp/blkcp-tui + C11 blkcp-c/blkcp-tui-c):
 make release
 
-# Erweiterte Regressionstest-Suite (33 Tests):
+# 4-stufiges OSS Security & Soundness Audit (Clippy Safety Gate, Unsafe-Zählung = 7, RustSec/Deny, 18 Unit-Tests):
+make audit
+
+# Erweiterte End-to-End Regressionstest-Suite (42 Tests gegen Rust blkcp):
 make test
+
+# End-to-End Regressionstest-Suite gegen die C11-Referenz (42 Tests gegen blkcp-c):
+make test-c
 
 # Vergleichende Performance-Benchmarks (15 Szenarien):
 ./tests/benchmark_compare.sh

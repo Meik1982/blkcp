@@ -167,4 +167,5 @@ audit:
 	$(CARGO) test --workspace --manifest-path rust/Cargo.toml --quiet
 	@echo "=== OSS SECURITY & SOUNDNESS AUDIT PASSED SUCCESSFULLY ==="
 
+.NOTPARALLEL:
 .PHONY: all rust-bins c-bins release clean clean-c test test-c benchmark man tui tui-c install uninstall audit

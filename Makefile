@@ -64,7 +64,7 @@ release:
 	$(MAKE) clean-c
 	$(MAKE) rust-bins
 	$(MAKE) CFLAGS="-O3 -DNDEBUG -flto -Wall -Wextra -pthread -Iinclude -Isrc -MMD -MP -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection -fPIE" LDFLAGS="-flto -pie -Wl,-O1,--sort-common,--as-needed,-z,relro,-z,now,-z,defs" c-bins
-	strip --strip-all $(TARGET_C) $(TARGET_TUI_C)
+	strip --strip-all $(TARGET) $(TARGET_TUI) $(TARGET_C) $(TARGET_TUI_C)
 	@mkdir -p bin
 	@cp -f $(TARGET) bin/$(TARGET)
 	@cp -f $(TARGET_TUI) bin/$(TARGET_TUI)

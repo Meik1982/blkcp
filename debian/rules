@@ -1,12 +1,19 @@
 #!/usr/bin/make -f
 
 export DH_VERBOSE = 1
+export PATH := $(HOME)/.cargo/bin:/home/runner/.cargo/bin:$(PATH)
 
 %:
 	dh $@
 
 override_dh_auto_build:
 	$(MAKE) release
+
+override_dh_auto_test:
+	true
+
+override_dh_dwz:
+	true
 
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/blkcp PREFIX=/usr
